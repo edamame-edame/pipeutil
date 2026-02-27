@@ -41,7 +41,17 @@ wheel.packages = ["python/pipeutil"]
 # 最小 CMake バージョン
 cmake.minimum-version = "3.25"
 
+# ─── オプション依存 ──────────────────────────────────────────────────
+
+[project.optional-dependencies]
+test = ["pytest>=8.0", "pytest-timeout>=2.3"]
+
 # ─── 開発ツール設定 ───────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+testpaths  = ["tests/python"]
+timeout    = 30          # テストごとの上限 (秒)
+addopts    = "-v --tb=short"
 
 [tool.mypy]
 python_version = "3.13"

@@ -1,6 +1,6 @@
 # レビュー集約（whole）
 
-最終更新: 2026-02-27 06:29:40
+最終更新: 2026-02-28 00:00:00
 最新レビューCSV: review/20260227062940.csv
 
 ## 1. 最新レビューの要約
@@ -8,7 +8,11 @@
 - 未修正指摘数（Medium 以上）: 0
 - 今回再レビューでの新規指摘（Medium 以上）: 0
 - 修正確認済み指摘数: 14（詳細は削除し、注意点へ集約）
-- ビルド確認: CMake Tools で構成失敗（環境未構成のためビルド可否は未判定）
+- ビルド確認:
+  - CMake Tools（Visual Studio 17 2022 / Release）: ✅ ビルド成功
+  - Python 3.13 wheel (`cp313-win_amd64`): ✅ 作成・インストール・import 確認済み
+  - Python 3.14 wheel (`cp314-win_amd64`): ✅ 作成・インストール・import 確認済み
+- GitHub 公開: ✅ https://github.com/edamame-edame/pipeutil.git（Initial commit: pipeutil v0.1.0）
 
 ---
 

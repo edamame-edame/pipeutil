@@ -24,6 +24,18 @@
         "PIPEUTIL_BUILD_TESTS": "OFF",
         "PIPEUTIL_BUILD_EXAMPLES": "OFF"
       }
+    },
+    {
+      "name": "vs-test",
+      "displayName": "VS Test (Debug + GTest)",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/vs-test",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PIPEUTIL_BUILD_PYTHON": "OFF",
+        "PIPEUTIL_BUILD_TESTS": "ON",
+        "PIPEUTIL_BUILD_EXAMPLES": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -36,6 +48,21 @@
       "name": "build-debug",
       "configurePreset": "vs-debug",
       "configuration": "Debug"
+    },
+    {
+      "name": "build-test",
+      "configurePreset": "vs-test",
+      "configuration": "Debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "run-test",
+      "configurePreset": "vs-test",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

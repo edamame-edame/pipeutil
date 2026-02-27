@@ -1,6 +1,7 @@
 {
 	"version": "2.0.0",
 	"tasks": [
+		// ─── ビルドタスク ──────────────────────────────────────────────
 		{
 			"label": "Build All (CMake + cp313/cp314 wheels)",
 			"type": "shell",
@@ -8,18 +9,77 @@
 			"options": {
 				"shell": {
 					"executable": "powershell.exe",
-					"args": [
-						"-NoProfile",
-						"-ExecutionPolicy",
-						"Bypass",
-						"-Command"
-					]
+					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
 				}
 			},
-			"group": {
-				"kind": "build",
-				"isDefault": true
+			"group": { "kind": "build", "isDefault": true },
+			"problemMatcher": []
+		},
+		// ─── C++ テストタスク ──────────────────────────────────────────
+		{
+			"label": "Test: Build C++ (vs-test)",
+			"type": "shell",
+			"command": "cmake --preset vs-test; cmake --build --preset build-test",
+			"options": {
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+				}
 			},
+			"group": "test",
+			"problemMatcher": ["$msCompile"]
+		},
+		{
+			"label": "Test: Run C++ (ctest)",
+			"type": "shell",
+			"command": "ctest --preset run-test",
+			"options": {
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+				}
+			},
+			"dependsOn": "Test: Build C++ (vs-test)",
+			"group": "test",
+			"problemMatcher": []
+		},
+		// ─── Python テストタスク ───────────────────────────────────────
+		{
+			"label": "Test: Install pipeutil (cp313 wheel)",
+			"type": "shell",
+			"command": "Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; Remove-Item -Force python\\pipeutil\\_pipeutil*.pyd -ErrorAction SilentlyContinue; .\\.venv313\\Scripts\\python.exe -m build --wheel; .\\.venv313\\Scripts\\pip.exe install --force-reinstall (Get-ChildItem dist\\*.whl | Select-Object -First 1).FullName",
+			"options": {
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+				}
+			},
+			"group": "test",
+			"problemMatcher": []
+		},
+		{
+			"label": "Test: Run Python (pytest)",
+			"type": "shell",
+			"command": ".\\.venv313\\Scripts\\python.exe -m pytest tests/python/ -v --tb=short --timeout=30",
+			"options": {
+				"shell": {
+					"executable": "powershell.exe",
+					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+				}
+			},
+			"dependsOn": "Test: Install pipeutil (cp313 wheel)",
+			"group": "test",
+			"problemMatcher": []
+		},
+		// ─── 全テスト一括実行 ──────────────────────────────────────────
+		{
+			"label": "Test: Run All (C++ + Python)",
+			"dependsOn": [
+				"Test: Run C++ (ctest)",
+				"Test: Run Python (pytest)"
+			],
+			"dependsOrder": "sequence",
+			"group": { "kind": "test", "isDefault": true },
 			"problemMatcher": []
 		}
 	]

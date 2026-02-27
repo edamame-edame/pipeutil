@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: ["master", "main", "develop"]
+    tags:     ["v*"]
+  pull_request:
+    branches: ["master", "main", "develop"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 1: C++ ユニットテスト
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  cpp-tests:
+    name: C++ Tests / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            preset_cfg: vs-test
+            preset_build: build-test
+            preset_test: run-test
+            build_cfg: Debug
+          - os: ubuntu-latest
+            preset_cfg: linux-test
+            preset_build: build-linux-test
+            preset_test: run-linux-test
+            build_cfg: Debug
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake (Windows)
+        if: runner.os == 'Windows'
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~3.25.0"
+
+      - name: Install build tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y cmake ninja-build gcc g++
+
+      # Windows: Visual Studio 17 2022 は runner に含まれる
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --preset ${{ matrix.preset_cfg }}
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build/linux-test \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPIPEUTIL_BUILD_PYTHON=OFF \
+            -DPIPEUTIL_BUILD_TESTS=ON
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --build --preset ${{ matrix.preset_build }}
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: cmake --build build/linux-test
+
+      - name: Run CTest (Windows)
+        if: runner.os == 'Windows'
+        run: ctest --preset ${{ matrix.preset_test }}
+
+      - name: Run CTest (Linux)
+        if: runner.os == 'Linux'
+        run: ctest --test-dir build/linux-test --output-on-failure
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 2: Python テスト
+# ─────────────────────────────────────────────────────────────────────────────
+  python-tests:
+    name: Python Tests / ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ["3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~3.25.0"
+
+      - name: Install MSVC (Windows only — included in runner)
+        if: runner.os == 'Windows'
+        run: echo "MSVC is pre-installed on windows-latest"
+
+      - name: Install build tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -y && sudo apt-get install -y gcc g++ ninja-build
+
+      - name: Install Python build & test dependencies
+        run: pip install build scikit-build-core cmake pytest pytest-timeout
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Install wheel
+        shell: bash
+        run: pip install dist/*.whl
+
+      - name: Run pytest
+        run: pytest tests/python/ -v --tb=short --timeout=30

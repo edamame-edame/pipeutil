@@ -1,0 +1,65 @@
+name: バグ報告
+description: 動作しない・クラッシュするなどの不具合を報告する
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: 不具合の概要
+      placeholder: "例：クライアントが接続後すぐに切断すると PipeServer::receive が返らない"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1. PipeServer を listen / accept する
+        2. クライアントが connect してすぐ close する
+        3. receive() が無限ブロックする
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する動作
+      placeholder: "ConnectionReset 例外が発生するべき"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      multiple: true
+      options:
+        - Windows 11
+        - Windows 10
+        - Ubuntu 22.04
+        - Ubuntu 24.04
+        - その他
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: pipeutil バージョン
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: test_case
+    attributes:
+      label: ✅ 回帰テストのスケッチ（任意だが推奨）
+      description: |
+        修正確認のためのテストコードを記載すると対応が早まります。
+      placeholder: |
+        ```python
+        def test_immediate_disconnect_raises_connection_reset(make_server):
+            ...
+        ```
