@@ -1,0 +1,26 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build All (CMake + cp313/cp314 wheels)",
+			"type": "shell",
+			"command": "cmake --preset vs-release; cmake --build --preset build-release; Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; Remove-Item -Force python\\pipeutil\\_pipeutil*.pyd -ErrorAction SilentlyContinue; .\\.venv313\\Scripts\\python.exe -m build --wheel; Remove-Item -Force python\\pipeutil\\_pipeutil*.pyd -ErrorAction SilentlyContinue; .\\.venv314\\Scripts\\python.exe -m build --wheel",
+			"options": {
+				"shell": {
+					"executable": "powershell.exe",
+					"args": [
+						"-NoProfile",
+						"-ExecutionPolicy",
+						"Bypass",
+						"-Command"
+					]
+				}
+			},
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": []
+		}
+	]
+}

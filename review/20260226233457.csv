@@ -1,0 +1,2 @@
+id,severity,category,file,line,issue,impact,recommendation,evidence,status
+R-011,High,Windows-IPC,spec/03_platform.md,102,"ConnectNamedPipe が TRUE を返す即時成功ケースを失敗扱いする分岐になっている","クライアント接続済みでも SystemError を送出し、accept が常時失敗する実装を誘発する","条件分岐を `if (connected) { success } else if (err == ERROR_PIPE_CONNECTED) { success } else if (err == ERROR_IO_PENDING) { wait } else { SystemError }` に修正する","spec/03_platform.md:102-124 の else 節が `connected == TRUE` を包含している",Open

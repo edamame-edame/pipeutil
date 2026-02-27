@@ -1,0 +1,311 @@
+// posix_pipe.cpp — POSIX UNIX ドメインソケット実装
+// 仕様: spec/03_platform.md §4
+#ifndef _WIN32
+
+#include "platform/posix_pipe.hpp"
+#include "pipeutil/pipe_error.hpp"
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <poll.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <cerrno>
+#include <climits>
+#include <chrono>
+#include <thread>
+#include <cstring>
+#include <stdexcept>
+#include <system_error>
+
+namespace pipeutil::detail {
+
+// ─── ユーティリティ ────────────────────────────────────────────────
+
+/// errno を PipeErrorCode にマッピングする
+static pipeutil::PipeErrorCode map_errno(int e) noexcept {
+    switch (e) {
+        case EPIPE:
+        case ECONNRESET:  return pipeutil::PipeErrorCode::BrokenPipe;
+        case ENOENT:
+        case ECONNREFUSED: return pipeutil::PipeErrorCode::NotFound;
+        case EACCES:       return pipeutil::PipeErrorCode::AccessDenied;
+        case ETIMEDOUT:    return pipeutil::PipeErrorCode::Timeout;
+        default:           return pipeutil::PipeErrorCode::SystemError;
+    }
+}
+
+// ─── PosixPipe ────────────────────────────────────────────────────
+
+PosixPipe::PosixPipe(std::size_t buf_size) : buf_size_(buf_size) {}
+
+PosixPipe::~PosixPipe() {
+    server_close();
+    client_close();
+}
+
+std::string PosixPipe::to_sock_path(const std::string& name) {
+    // sun_path 最大108バイト制約チェック（プレフィックス含む）
+    const std::string path = "/tmp/pipeutil/" + name + ".sock";
+    if (path.size() >= sizeof(sockaddr_un::sun_path)) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::InvalidArgument,
+                                      "Pipe name too long for UNIX domain socket path"};
+    }
+    return path;
+}
+
+void PosixPipe::ensure_dir() {
+    // /tmp/pipeutil/ が存在しなければ作成（モード 0700）
+    if (mkdir("/tmp/pipeutil", 0700) != 0) {
+        if (errno != EEXIST) {
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
+                                          "Failed to create /tmp/pipeutil/"};
+        }
+    }
+}
+
+// ─── サーバー操作 ─────────────────────────────────────────────────
+
+void PosixPipe::server_create(const std::string& pipe_name) {
+    if (listening_) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::AlreadyConnected,
+                                      "Already listening"};
+    }
+
+    ensure_dir();
+    sock_path_ = to_sock_path(pipe_name);
+
+    // 1. ソケット作成
+    server_fd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (server_fd_ < 0) {
+        throw pipeutil::PipeException{map_errno(errno), "socket() failed"};
+    }
+
+    // 2. 既存ソケットファイル削除（前回クラッシュ残留対策）
+    unlink(sock_path_.c_str());
+
+    // 3. バインド
+    sockaddr_un addr = {};
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, sock_path_.c_str(), sizeof(addr.sun_path) - 1);
+
+    if (bind(server_fd_, reinterpret_cast<sockaddr*>(&addr),
+             sizeof(addr)) != 0) {
+        const int e = errno;
+        close(server_fd_);
+        server_fd_ = -1;
+        throw pipeutil::PipeException{map_errno(e), "bind() failed"};
+    }
+
+    // 4. listen（バックログ 1）
+    if (listen(server_fd_, 1) != 0) {
+        const int e = errno;
+        close(server_fd_);
+        server_fd_ = -1;
+        throw pipeutil::PipeException{map_errno(e), "listen() failed"};
+    }
+
+    listening_ = true;
+}
+
+void PosixPipe::server_accept(int64_t timeout_ms) {
+    if (!listening_) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::NotConnected,
+                                      "server_create() must be called before server_accept()"};
+    }
+
+    // poll でタイムアウト制御
+    pollfd pfd{};
+    pfd.fd     = server_fd_;
+    pfd.events = POLLIN;
+    const int timeout_int = (timeout_ms == 0)
+                              ? -1
+                              : static_cast<int>(timeout_ms);
+    const int ret = poll(&pfd, 1, timeout_int);
+    if (ret == 0) throw pipeutil::PipeException{pipeutil::PipeErrorCode::Timeout};
+    if (ret < 0)  throw pipeutil::PipeException{map_errno(errno), "poll() failed"};
+
+    client_fd_ = accept4(server_fd_, nullptr, nullptr, SOCK_CLOEXEC);
+    if (client_fd_ < 0) {
+        throw pipeutil::PipeException{map_errno(errno), "accept4() failed"};
+    }
+    connected_ = true;
+}
+
+void PosixPipe::server_close() noexcept {
+    if (client_fd_ >= 0) {
+        close(client_fd_);
+        client_fd_ = -1;
+    }
+    if (server_fd_ >= 0) {
+        close(server_fd_);
+        server_fd_ = -1;
+        // ソケットファイルを削除してクリーンアップ
+        if (!sock_path_.empty()) {
+            unlink(sock_path_.c_str());
+            sock_path_.clear();
+        }
+    }
+    listening_ = false;
+    connected_ = false;
+}
+
+// ─── クライアント操作 ─────────────────────────────────────────────
+
+void PosixPipe::client_connect(const std::string& pipe_name, int64_t timeout_ms) {
+    if (connected_) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::AlreadyConnected,
+                                      "Already connected"};
+    }
+
+    const std::string path = to_sock_path(pipe_name);
+
+    client_fd_ = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (client_fd_ < 0) {
+        throw pipeutil::PipeException{map_errno(errno), "socket() failed"};
+    }
+
+    sockaddr_un addr = {};
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1);
+
+    const auto deadline = std::chrono::steady_clock::now()
+                        + std::chrono::milliseconds{timeout_ms};
+
+    while (true) {
+        if (connect(client_fd_,
+                    reinterpret_cast<sockaddr*>(&addr),
+                    sizeof(addr)) == 0) {
+            break; // 接続成功
+        }
+
+        const int e = errno;
+        if (e == ENOENT || e == ECONNREFUSED) {
+            // サーバーが未起動 / ソケットファイルが存在しない → リトライ
+            if (timeout_ms > 0 && std::chrono::steady_clock::now() >= deadline) {
+                close(client_fd_);
+                client_fd_ = -1;
+                throw pipeutil::PipeException{pipeutil::PipeErrorCode::Timeout};
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            continue;
+        }
+
+        close(client_fd_);
+        client_fd_ = -1;
+        throw pipeutil::PipeException{map_errno(e), "connect() failed"};
+    }
+
+    connected_ = true;
+}
+
+void PosixPipe::client_close() noexcept {
+    if (client_fd_ >= 0) {
+        close(client_fd_);
+        client_fd_ = -1;
+    }
+    connected_ = false;
+}
+
+// ─── 共通 I/O ─────────────────────────────────────────────────────
+
+void PosixPipe::write_all(const std::byte* data, std::size_t size) {
+    const std::byte* ptr = data;
+    std::size_t remaining = size;
+    const int fd = (client_fd_ >= 0) ? client_fd_ : -1;
+    if (fd < 0) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::NotConnected,
+                                      "Not connected"};
+    }
+
+    while (remaining > 0) {
+        const ssize_t n = send(fd, ptr, remaining, MSG_NOSIGNAL);
+        if (n < 0) {
+            const int e = errno;
+            if (e == EINTR) continue;
+            if (e == EPIPE) {
+                connected_ = false;
+                throw pipeutil::PipeException{pipeutil::PipeErrorCode::BrokenPipe};
+            }
+            throw pipeutil::PipeException{map_errno(e), "send() failed"};
+        }
+        ptr       += n;
+        remaining -= static_cast<std::size_t>(n);
+    }
+}
+
+void PosixPipe::read_all(std::byte* buf, std::size_t size, int64_t timeout_ms) {
+    timed_read_all(buf, size,
+                   (timeout_ms == 0) ? -1 : static_cast<int>(timeout_ms));
+}
+
+void PosixPipe::timed_read_all(std::byte* buf, std::size_t size, int timeout_ms_int) {
+    std::byte* ptr = buf;
+    std::size_t remaining = size;
+    const int fd = (client_fd_ >= 0) ? client_fd_ : -1;
+    if (fd < 0) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::NotConnected,
+                                      "Not connected"};
+    }
+
+    // -1 は無限待機。それ以外はデッドラインを計算して全チャンク合計に上限を設ける (R-015)
+    const bool infinite = (timeout_ms_int < 0);
+    using Clock = std::chrono::steady_clock;
+    const auto deadline = infinite
+        ? Clock::time_point::max()
+        : Clock::now() + std::chrono::milliseconds{timeout_ms_int};
+
+    while (remaining > 0) {
+        // チャンクごとの残り待機時間を算出
+        int chunk_timeout_ms = timeout_ms_int;
+        if (!infinite) {
+            const auto now  = Clock::now();
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - now).count();
+            if (left <= 0) {
+                throw pipeutil::PipeException{pipeutil::PipeErrorCode::Timeout};
+            }
+            chunk_timeout_ms = (left > static_cast<long long>(INT_MAX))
+                ? INT_MAX
+                : static_cast<int>(left);
+        }
+
+        // poll でタイムアウト付き待機
+        pollfd pfd{};
+        pfd.fd     = fd;
+        pfd.events = POLLIN;
+        const int ret = poll(&pfd, 1, chunk_timeout_ms);
+        if (ret == 0) throw pipeutil::PipeException{pipeutil::PipeErrorCode::Timeout};
+        if (ret < 0) {
+            const int e = errno;
+            if (e == EINTR) continue;
+            throw pipeutil::PipeException{map_errno(e), "poll() failed"};
+        }
+
+        const ssize_t n = recv(fd, ptr, remaining, 0);
+        if (n < 0) {
+            const int e = errno;
+            if (e == EINTR) continue;
+            connected_ = false;
+            throw pipeutil::PipeException{map_errno(e), "recv() failed"};
+        }
+        if (n == 0) {
+            // EOF
+            connected_ = false;
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::ConnectionReset,
+                                          "EOF on socket"};
+        }
+        ptr       += n;
+        remaining -= static_cast<std::size_t>(n);
+    }
+}
+
+// ─── 状態照会 ─────────────────────────────────────────────────────
+
+bool PosixPipe::is_server_listening() const noexcept { return listening_; }
+bool PosixPipe::is_connected()        const noexcept { return connected_; }
+
+} // namespace pipeutil::detail
+
+#endif // !_WIN32

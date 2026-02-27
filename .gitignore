@@ -1,0 +1,53 @@
+# ─── ビルド成果物 ─────────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+
+# ─── Python 仮想環境 ──────────────────────────────────────────────────
+.venv*/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ─── C++ コンパイル中間ファイル ───────────────────────────────────────
+*.obj
+*.o
+*.ilk
+*.pdb
+*.exp
+*.lib
+*.dll
+*.so
+*.dylib
+
+# python/pipeutil 直下のビルド済みバイナリは除外
+python/pipeutil/*.pyd
+python/pipeutil/*.dll
+python/pipeutil/*.so
+
+# 生成エクスポートヘッダ
+source/core/include/pipeutil/pipeutil_export.hpp
+
+# ─── CMake キャッシュ ─────────────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+
+# ─── VS Code 機密設定（settings.json は例外として追跡） ───────────────
+.vscode/*.log
+
+# ─── OS メタ ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── エディタ・IDE ────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo

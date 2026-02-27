@@ -1,0 +1,15 @@
+{
+    "files.encoding": "utf8",
+    "cmake.cmakePath": "C:\\Program Files\\CMake\\bin\\cmake.exe",
+    "cmake.useCMakePresets": "never",
+    "cmake.configureOnOpen": true,
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.buildDirectory": "${workspaceFolder}/build/cmake-tools",
+    "cmake.generator": "Visual Studio 17 2022",
+    "cmake.buildType": "Release",
+    "cmake.buildArgs": [
+        "--config",
+        "Release"
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
+}

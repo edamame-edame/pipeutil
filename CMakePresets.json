@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "vs-release",
+      "displayName": "VS Release",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/vs-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PIPEUTIL_BUILD_PYTHON": "ON",
+        "PIPEUTIL_BUILD_TESTS": "OFF",
+        "PIPEUTIL_BUILD_EXAMPLES": "OFF"
+      }
+    },
+    {
+      "name": "vs-debug",
+      "displayName": "VS Debug",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build/vs-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PIPEUTIL_BUILD_PYTHON": "ON",
+        "PIPEUTIL_BUILD_TESTS": "OFF",
+        "PIPEUTIL_BUILD_EXAMPLES": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-release",
+      "configurePreset": "vs-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "build-debug",
+      "configurePreset": "vs-debug",
+      "configuration": "Debug"
+    }
+  ]
+}

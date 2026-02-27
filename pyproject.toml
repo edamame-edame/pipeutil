@@ -1,0 +1,52 @@
+# pyproject.toml — pipeutil ビルド設定
+# ビルドバックエンド: scikit-build-core (spec/05_build.md §6)
+
+[build-system]
+requires = ["scikit-build-core>=0.9", "cmake>=3.25"]
+build-backend = "scikit_build_core.build"
+
+# ─── プロジェクトメタデータ ───────────────────────────────────────────
+
+[project]
+name = "pipeutil"
+version = "0.1.0"
+description = "High-speed IPC pipe communication library (Windows/Linux)"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "pipeutil contributors" },
+]
+keywords = ["ipc", "pipe", "named-pipe", "unix-socket", "communication"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: C++",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: System :: Networking",
+    "Typing :: Typed",
+]
+
+# ─── scikit-build-core 設定 ───────────────────────────────────────────
+
+[tool.scikit-build]
+# CMake ビルド設定
+cmake.build-type = "Release"
+cmake.args = ["-DPIPEUTIL_BUILD_PYTHON=ON"]
+
+# Python パッケージディレクトリ
+wheel.packages = ["python/pipeutil"]
+
+# 最小 CMake バージョン
+cmake.minimum-version = "3.25"
+
+# ─── 開発ツール設定 ───────────────────────────────────────────────────
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
