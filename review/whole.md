@@ -1,18 +1,20 @@
 # レビュー集約（whole）
 
-最終更新: 2026-02-28 02:12:28
+最終更新: 2026-03-07 21:00:00
 最新レビューCSV: review/20260228021228.csv
 
 ## 1. 最新レビューの要約
 
 - 未修正指摘数（Medium 以上）: 0
 - 今回再レビューでの新規指摘（Medium 以上）: 0
-- 修正確認済み指摘数: 23（詳細は削除し、注意点へ集約）
+- 修正確認済み指摘数: 27（詳細は削除し、注意点へ集約）
 - ビルド確認:
   - CMake Tools（Visual Studio 17 2022 / Release）: ✅ ビルド成功
-  - Python 3.13 wheel (`cp313-win_amd64`): ✅ 作成・インストール・import 確認済み
-  - Python 3.14 wheel (`cp314-win_amd64`): ✅ 作成・インストール・import 確認済み
-- GitHub 公開: ✅ https://github.com/edamame-edame/pipeutil.git（Initial commit: pipeutil v0.1.0）
+  - Python 3.14 wheel (`cp314-win_amd64`): ✅ ビルド成功
+- テスト結果（F-001 実装後）:
+  - C++ (CTest): ✅ 38/38 PASS（33 既存 + 5 新規 MultiPipeServer）
+  - Python (pytest): ✅ 22/22 PASS（19 既存 + 3 新規 MultiPipeServer）
+- GitHub: ✅ https://github.com/edamame-edame/pipeutil.git（cc5e056: feat(F-001)）
 
 ---
 
@@ -41,6 +43,10 @@
 - R-022（Spec-Consistency）: 「公開 API 不変更」と「内部フレーム実装更新」の境界を設計書で明示すること。
 - R-023（Spec-Consistency）: `RpcPipeServer` API 例の `stop()` 宣言を保持し、`run_in_background` と停止手段の契約を一致させること。
 - R-024（Spec-Quality）: 設計書の文字化け/誤字を除去し、技術用語を一貫した日本語へ正規化すること。
+- R-025（Windows-IPC / F-001）: `server_close()` の `DisconnectNamedPipe` は forked 接続では不要であり、クライアント側 pending I/O を即座に失敗させる。`FlushFileBuffers + CloseHandle` に変更すること。
+- R-026（Python-CAPI / F-001）: `PyMessage_Type.tp_as_buffer = nullptr` のままでは `bytes(msg)` が TypeError。`PyBufferProcs` を実装して buffer protocol を有効化すること。
+- R-027（Python-CAPI / F-001）: `to_ms(double sec)` が入力をミリ秒ではなく秒と誤解釈して `* 1000.0` していた。Python API のタイムアウト引数はミリ秒単位なので変換不要（`static_cast<int64_t>(ms_val)` のみ）。
+- R-028（API-Contract / F-001）: `PyMessage_init` が `str` 入力を受け付けていたが、公開 API は `bytes / bytearray` のみを要求する。`PyUnicode_Check` ブランチを削除し `TypeError` を送出すること。
 
 ---
 
