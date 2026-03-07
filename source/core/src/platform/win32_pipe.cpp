@@ -69,11 +69,26 @@ void Win32Pipe::server_create(const std::string& pipe_name) {
     }
 
     const std::wstring path = to_pipe_path(pipe_name);
+    pipe_name_wstr_ = path;  // server_accept_and_fork で再作成するために保存
+
+    // stop_event_ を作成（manual-reset、初期非シグナル状態）
+    // stop_accept() が SetEvent() を呼ぶまで非シグナルのまま。
+    if (stop_event_) {
+        CloseHandle(stop_event_);
+        stop_event_ = nullptr;
+    }
+    stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!stop_event_) {
+        // hPipe_ はまだ作成前なのでクローズ不要
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
+                                      "CreateEventW failed (stop_event)"};
+    }
+
     hPipe_ = CreateNamedPipeW(
         path.c_str(),
         PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-        1,                                        // 最大インスタンス数（現バージョン: 1）
+        PIPE_UNLIMITED_INSTANCES,                 // MultiPipeServer の複数同時接続に対応
         static_cast<DWORD>(buf_size_),            // 出力バッファ
         static_cast<DWORD>(buf_size_),            // 入力バッファ
         0,                                        // デフォルトタイムアウト
@@ -84,6 +99,17 @@ void Win32Pipe::server_create(const std::string& pipe_name) {
         const DWORD err = GetLastError();
         throw pipeutil::PipeException{map_win32_error(err), "CreateNamedPipeW failed"};
     }
+
+    // accept 用イベントをここで作成（manual-reset、初期非シグナル）
+    if (accept_event_) { CloseHandle(accept_event_); }
+    accept_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!accept_event_) {
+        CloseHandle(hPipe_); hPipe_ = INVALID_HANDLE_VALUE;
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
+                                      "CreateEventW failed (accept_event)"};
+    }
+    accept_ov_ = {};
+    accept_ov_.hEvent = accept_event_;
     listening_ = true;
 }
 
@@ -134,14 +160,123 @@ void Win32Pipe::server_accept(int64_t timeout_ms) {
     connected_ = true;
 }
 
+void Win32Pipe::stop_accept() noexcept {
+    if (stop_event_) {
+        SetEvent(stop_event_);
+    }
+}
+
+std::unique_ptr<IPlatformPipe> Win32Pipe::server_accept_and_fork(int64_t timeout_ms) {
+    if (!listening_) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::NotConnected,
+                                      "server_create() must be called before server_accept_and_fork()"};
+    }
+    if (!stop_event_ || !accept_event_) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
+                                      "events not initialized; call server_create() first"};
+    }
+
+    // accept_ov_ / accept_event_ はメンバー変数: lifetime が Win32Pipe と同じなので
+    // stop path で GetOverlappedResult を待たずに throw しても安全。
+    // I/O は server_close() で hPipe_ を CloseHandle した際に OS が自動キャンセルする。
+    ResetEvent(accept_event_);
+    accept_ov_ = {};
+    accept_ov_.hEvent = accept_event_;
+
+    const BOOL connected_res = ConnectNamedPipe(hPipe_, &accept_ov_);
+    const DWORD err = GetLastError();
+
+    if (connected_res || err == ERROR_PIPE_CONNECTED) {
+        // 即時成功（クライアントがすでに接続済み）— accept_ov_ は使用済み、何もしない
+    } else if (err == ERROR_IO_PENDING) {
+        // 非同期: stop_event_ または accept イベントを待つ
+        HANDLE handles[2] = {accept_event_, stop_event_};
+        const DWORD dw_timeout = (timeout_ms == 0)
+                                   ? INFINITE
+                                   : static_cast<DWORD>(timeout_ms);
+        const DWORD wait_res = WaitForMultipleObjects(2, handles, FALSE, dw_timeout);
+
+        if (wait_res == WAIT_TIMEOUT) {
+            // タイムアウト: I/O はメンバー OVERLAPPED なので後始末は server_close() に委ねる
+            CancelIoEx(hPipe_, &accept_ov_);
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::Timeout};
+        }
+        if (wait_res == WAIT_OBJECT_0 + 1) {
+            // stop_accept() による中断: GetOverlappedResult を待たずに throw でよい。
+            // 未完了の I/O は accept_ov_（メンバー）に結果が書かれ、
+            // platform_.reset() → server_close() → CloseHandle(hPipe_) で OS がキャンセルする。
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::Interrupted,
+                                          "accept cancelled by stop_accept()"};
+        }
+        if (wait_res != WAIT_OBJECT_0) {
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
+                                          "WaitForMultipleObjects failed"};
+        }
+
+        DWORD dummy = 0;
+        if (!GetOverlappedResult(hPipe_, &accept_ov_, &dummy, FALSE)) {
+            const DWORD err2 = GetLastError();
+            throw pipeutil::PipeException{map_win32_error(err2),
+                                          "GetOverlappedResult failed (accept_and_fork)"};
+        }
+    } else {
+        throw pipeutil::PipeException{map_win32_error(err), "ConnectNamedPipe failed"};
+    }
+
+    // ─── fork: 接続済み HANDLE を新しい Win32Pipe インスタンスに移す ──
+    auto forked = std::make_unique<Win32Pipe>(buf_size_);
+    forked->hPipe_     = hPipe_;  // 接続済みハンドルを譲渡
+    forked->listening_ = false;
+    forked->connected_ = true;
+
+    // 自身は次クライアント用の新しいハンドルを作成して listen 状態を維持
+    hPipe_ = CreateNamedPipeW(
+        pipe_name_wstr_.c_str(),
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+        PIPE_UNLIMITED_INSTANCES,
+        static_cast<DWORD>(buf_size_),
+        static_cast<DWORD>(buf_size_),
+        0,
+        nullptr
+    );
+    if (hPipe_ == INVALID_HANDLE_VALUE) {
+        const DWORD err2 = GetLastError();
+        hPipe_     = INVALID_HANDLE_VALUE;
+        listening_ = false;
+        throw pipeutil::PipeException{map_win32_error(err2),
+                                      "CreateNamedPipeW failed in accept_and_fork (next handle)"};
+    }
+
+    return forked;
+}
+
 void Win32Pipe::server_close() noexcept {
     if (hPipe_ != INVALID_HANDLE_VALUE) {
         if (connected_) {
-            DisconnectNamedPipe(hPipe_);
+            // クライアントが未読データを読み切るまで待機してから切断する (R-F001-1)。
+            // FlushFileBuffers はデータが全てクライアントに渡るまでブロックする。
+            // DisconnectNamedPipe は呼ばない: accepted (forked) 接続では不要であり、
+            // 呼ぶとクライアントの pending ReadFile が ERROR_PIPE_NOT_CONNECTED で失敗する。
+            // CloseHandle 単独でカーネルが書き込みバッファをフラッシュして接続を閉じる。
+            FlushFileBuffers(hPipe_);
         }
+        // CloseHandle により pending な ConnectNamedPipe I/O が自動キャンセルされ
+        // accept_ov_ に完了通知が書き込まれる（メンバー変数なので安全）。
         CloseHandle(hPipe_);
         hPipe_ = INVALID_HANDLE_VALUE;
     }
+    if (accept_event_) {
+        // hPipe_ を閉じた後に accept_event_ を閉じる（順序重要）
+        CloseHandle(accept_event_);
+        accept_event_ = nullptr;
+        accept_ov_    = {};
+    }
+    if (stop_event_) {
+        CloseHandle(stop_event_);
+        stop_event_ = nullptr;
+    }
+    pipe_name_wstr_.clear();
     listening_  = false;
     connected_  = false;
 }

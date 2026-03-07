@@ -1,0 +1,3 @@
+id,severity,category,file,line,issue,impact,recommendation,evidence,status
+R-023,High,Spec-Consistency,spec/F002_rpc_message_id.md,210-230,RpcPipeServer API 例で stop() 宣言脱落の懸念,run_in_background=true 運用時の停止手段不明化を招く,stop() を API 例に復元してライフサイクル契約を明示する,5章 API に void stop() noexcept; が追加済みで整合確認,Resolved
+R-024,Medium,Spec-Quality,spec/F002_rpc_message_id.md,130-131|226|347,文字化け/誤字混入の懸念,仕様可読性低下と誤実装の誘因,該当語を自然な技術文へ修正し用語統一する,異常文字列の消失を確認（実装/拡張/は不変更/UB 漏れ/担当）,Resolved

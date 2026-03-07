@@ -24,6 +24,12 @@ public:
         , platform_(std::make_unique<detail::PlatformPipeImpl>(buf_size))
     {}
 
+    /// 内部コンストラクタ: accept 済みの IPlatformPipe を受け取る（MultiPipeServer 専用）
+    Impl(std::string name, std::size_t /*buf_size*/, std::unique_ptr<detail::IPlatformPipe> accepted)
+        : pipe_name_(std::move(name))
+        , platform_(std::move(accepted))
+    {}
+
     void listen() {
         platform_->server_create(pipe_name_);
     }
@@ -140,6 +146,14 @@ private:
 
 PipeServer::PipeServer(std::string pipe_name, std::size_t buffer_size)
     : impl_(std::make_unique<Impl>(std::move(pipe_name), buffer_size))
+{}
+
+/// MultiPipeServer 専用: accept 済みの IPlatformPipe を保持する PipeServer を構築する
+PipeServer::PipeServer(FromAcceptedTag,
+                       std::string pipe_name,
+                       std::size_t buffer_size,
+                       std::unique_ptr<detail::IPlatformPipe> accepted)
+    : impl_(std::make_unique<Impl>(std::move(pipe_name), buffer_size, std::move(accepted)))
 {}
 
 PipeServer::PipeServer(PipeServer&& other) noexcept = default;

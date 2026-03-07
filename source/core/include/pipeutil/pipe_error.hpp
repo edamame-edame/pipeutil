@@ -34,6 +34,7 @@ enum class PipeErrorCode : int {
     // その他
     InvalidArgument  = 30,
     NotSupported     = 31,
+    Interrupted      = 32,  // accept 操作が stop_accept() によって中断された
 };
 
 // PipeErrorCode を std::error_category に変換するユーティリティ（内部実装用）

@@ -133,6 +133,63 @@ void PosixPipe::server_accept(int64_t timeout_ms) {
     connected_ = true;
 }
 
+void PosixPipe::stop_accept() noexcept {
+    if (stop_fd_[1] >= 0) {
+        // stop_accept_and_fork() の poll を起床させるためにバイトを書き込む
+        const char c = 'x';
+        while (write(stop_fd_[1], &c, 1) < 0 && errno == EINTR) {}  // EINTR リトライ
+    }
+}
+
+std::unique_ptr<IPlatformPipe> PosixPipe::server_accept_and_fork(int64_t timeout_ms) {
+    if (!listening_) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::NotConnected,
+                                      "server_create() must be called before server_accept_and_fork()"};
+    }
+
+    // stop_fd_ pair を初回作成（O_CLOEXEC 付き）
+    if (stop_fd_[0] < 0) {
+        if (pipe(stop_fd_) != 0) {
+            throw pipeutil::PipeException{map_errno(errno), "pipe() failed (stop_fd)"};
+        }
+        // O_CLOEXEC を設定して exec 時に自動クローズ
+        for (int fd : stop_fd_) {
+            fcntl(fd, F_SETFD, FD_CLOEXEC);
+        }
+    }
+
+    pollfd pfds[2]{};
+    pfds[0].fd     = server_fd_;
+    pfds[0].events = POLLIN;
+    pfds[1].fd     = stop_fd_[0];
+    pfds[1].events = POLLIN;
+
+    const int timeout_int = (timeout_ms == 0)
+                              ? -1
+                              : static_cast<int>(timeout_ms);
+    const int ret = poll(pfds, 2, timeout_int);
+    if (ret == 0) throw pipeutil::PipeException{pipeutil::PipeErrorCode::Timeout};
+    if (ret < 0)  throw pipeutil::PipeException{map_errno(errno), "poll() failed"};
+
+    // stop_accept() によって stop_fd_[0] に書き込みがあった場合
+    if (pfds[1].revents & POLLIN) {
+        throw pipeutil::PipeException{pipeutil::PipeErrorCode::Interrupted,
+                                      "accept cancelled by stop_accept()"};
+    }
+
+    const int client_fd = accept4(server_fd_, nullptr, nullptr, SOCK_CLOEXEC);
+    if (client_fd < 0) {
+        throw pipeutil::PipeException{map_errno(errno), "accept4() failed"};
+    }
+
+    // fork: 新しい PosixPipe インスタンスに接続済み fd のみを設定して返す
+    auto forked = std::make_unique<PosixPipe>(buf_size_);
+    forked->client_fd_ = client_fd;
+    forked->connected_ = true;
+
+    return forked;
+}
+
 void PosixPipe::server_close() noexcept {
     if (client_fd_ >= 0) {
         close(client_fd_);
@@ -145,6 +202,13 @@ void PosixPipe::server_close() noexcept {
         if (!sock_path_.empty()) {
             unlink(sock_path_.c_str());
             sock_path_.clear();
+        }
+    }
+    // stop_accept 用パイプを閉じる
+    for (int& fd : stop_fd_) {
+        if (fd >= 0) {
+            close(fd);
+            fd = -1;
         }
     }
     listening_ = false;

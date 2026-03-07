@@ -4,6 +4,7 @@
 #ifndef _WIN32
 
 #include "pipeutil/detail/platform_pipe.hpp"
+#include <memory>
 #include <string>
 
 namespace pipeutil::detail {
@@ -21,6 +22,8 @@ public:
     // サーバー操作
     void server_create(const std::string& pipe_name) override;
     void server_accept(int64_t timeout_ms)            override;
+    std::unique_ptr<IPlatformPipe> server_accept_and_fork(int64_t timeout_ms) override;
+    void stop_accept() noexcept                       override;
     void server_close() noexcept                      override;
 
     // クライアント操作
@@ -40,6 +43,7 @@ public:
 private:
     int         server_fd_ = -1;   // listen ソケット
     int         client_fd_ = -1;   // accept/connect 後の I/O ソケット
+    int         stop_fd_[2] = {-1, -1};  // pipe pair (stop_fd_[0]=read, [1]=write, stop_accept 用)
     bool        listening_ = false;
     bool        connected_ = false;
     std::size_t buf_size_;

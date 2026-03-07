@@ -12,6 +12,7 @@
 #include <windows.h>
 
 #include "pipeutil/detail/platform_pipe.hpp"
+#include <memory>
 #include <string>
 
 namespace pipeutil::detail {
@@ -30,6 +31,8 @@ public:
     // サーバー操作
     void server_create(const std::string& pipe_name) override;
     void server_accept(int64_t timeout_ms)            override;
+    std::unique_ptr<IPlatformPipe> server_accept_and_fork(int64_t timeout_ms) override;
+    void stop_accept() noexcept                       override;
     void server_close() noexcept                      override;
 
     // クライアント操作
@@ -47,10 +50,17 @@ public:
     [[nodiscard]] bool is_connected()        const noexcept override;
 
 private:
-    HANDLE       hPipe_     = INVALID_HANDLE_VALUE; // サーバー: pipe HANDLE / クライアント: 同一
-    bool         listening_ = false;
-    bool         connected_ = false;
+    HANDLE       hPipe_          = INVALID_HANDLE_VALUE; // サーバー/クライアント共用 HANDLE
+    HANDLE       stop_event_     = nullptr;              // manual-reset イベント（stop_accept 用）
+    // accept 用 OVERLAPPED をメンバーとして保持（スタック上に置くと lifetime 問題が起きる）
+    // stop path では GetOverlappedResult を呼ばず投げてよい: I/O は server_close で hPipe_ を
+    // 閉じた際に自動キャンセルされ、accept_ov_ が書き換えられても安全。
+    OVERLAPPED   accept_ov_      = {};                   // ConnectNamedPipe 用 OVERLAPPED
+    HANDLE       accept_event_   = nullptr;              // accept_ov_.hEvent
+    bool         listening_      = false;
+    bool         connected_      = false;
     std::size_t  buf_size_;
+    std::wstring pipe_name_wstr_;  // server_accept_and_fork で再作成するために保存
 
     /// 論理名 → Windows 名前付きパイプパス変換
     static std::wstring to_pipe_path(const std::string& name);

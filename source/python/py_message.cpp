@@ -40,15 +40,10 @@ static int PyMessage_init(PyMessage* self, PyObject* args, PyObject* /*kwds*/) {
             std::span<const std::byte>{
                 reinterpret_cast<const std::byte*>(buf),
                 static_cast<std::size_t>(sz)}};
-    } else if (PyUnicode_Check(data)) {
-        // str → UTF-8 バイト列
-        Py_ssize_t sz = 0;
-        const char* utf8 = PyUnicode_AsUTF8AndSize(data, &sz);
-        if (!utf8) return -1;
-        msg_val = pipeutil::Message{std::string_view{utf8, static_cast<std::size_t>(sz)}};
     } else {
+        // str を含む bytes 以外の型は拒否する（bytes-only API）
         PyErr_SetString(PyExc_TypeError,
-                        "Message() argument must be bytes, bytearray, or str");
+                        "Message() argument must be bytes or bytearray");
         return -1;
     }
 
@@ -112,6 +107,30 @@ static PyObject* PyMessage_repr(PyMessage* self) {
     return PyUnicode_FromFormat("Message(size=%zu)", sz);
 }
 
+// ─── Buffer protocol ────────────────────────────────────────────────────
+// bytes(msg) / memoryview(msg) を可能にするため Py_buffer を実装する。
+// payload() が返す span は Message 生存中は有効なので read-only バッファとして公開する。
+
+static int PyMessage_getbuffer(PyMessage* self, Py_buffer* view, int flags) {
+    if (!self->msg) {
+        PyErr_SetString(PyExc_RuntimeError, "Message is not initialized");
+        return -1;
+    }
+    const auto payload = self->msg->payload();
+    return PyBuffer_FillInfo(
+        view,
+        reinterpret_cast<PyObject*>(self),
+        const_cast<void*>(static_cast<const void*>(payload.data())),
+        static_cast<Py_ssize_t>(payload.size()),
+        1,       // read-only
+        flags);
+}
+
+static PyBufferProcs PyMessage_as_buffer = {
+    reinterpret_cast<getbufferproc>(PyMessage_getbuffer),
+    nullptr  // bf_releasebuffer: PyBuffer_FillInfo は解放不要
+};
+
 // ─── スロット定義 ─────────────────────────────────────────────────────
 
 static PySequenceMethods PyMessage_as_sequence = {
@@ -153,7 +172,7 @@ PyTypeObject PyMessage_Type = {
     nullptr,                                   // tp_str
     nullptr,                                   // tp_getattro
     nullptr,                                   // tp_setattro
-    nullptr,                                   // tp_as_buffer
+    &PyMessage_as_buffer,                       // tp_as_buffer
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  // tp_flags
     "pipeutil Message object.\n\nMessage(data: bytes | str)\n",  // tp_doc
     nullptr,                                   // tp_traverse

@@ -1,13 +1,13 @@
 # レビュー集約（whole）
 
-最終更新: 2026-02-28 00:00:00
-最新レビューCSV: review/20260227062940.csv
+最終更新: 2026-02-28 02:12:28
+最新レビューCSV: review/20260228021228.csv
 
 ## 1. 最新レビューの要約
 
 - 未修正指摘数（Medium 以上）: 0
 - 今回再レビューでの新規指摘（Medium 以上）: 0
-- 修正確認済み指摘数: 14（詳細は削除し、注意点へ集約）
+- 修正確認済み指摘数: 23（詳細は削除し、注意点へ集約）
 - ビルド確認:
   - CMake Tools（Visual Studio 17 2022 / Release）: ✅ ビルド成功
   - Python 3.13 wheel (`cp313-win_amd64`): ✅ 作成・インストール・import 確認済み
@@ -32,6 +32,15 @@
 - R-013（Windows-IPC）: `overlapped_write_all()` の `GetOverlappedResult` 戻り値は必ず検査し、失敗時は `map_win32_error` で変換して例外を送出すること（read 側と対称に）。
 - R-014（Protocol-Format）: `Message::payload().size()` を `uint32_t` にキャストする前に `> numeric_limits<uint32_t>::max()` の overflow guard を入れること。
 - R-015（Timeout-Contract）: `read_all` 系関数は関数入口でデッドラインを算出し、ループ内でチャンクごとの残り時間を計算して `poll` / `WaitForSingleObject` に渡すこと。
+- R-016（Concurrency）: ハンドラ例外時でも `sem_.release()` / `active_count_` 更新を保証する RAII ガードでスロット枯渇を防ぐこと。
+- R-017（Resource-Lifecycle）: `handler_threads_` の蓄積を避け、`detach()` + `active_count_` + `done_cv_` で完了追跡すること。
+- R-018（Spec-Inconsistency）: acceptor のフロー記述を `server_accept_and_fork()` 前提に統一すること。
+- R-019（Timeout-Contract）: `timeout=0` は `future.wait()`、有限値は `wait_for()` に分岐して契約どおり実装すること。
+- R-020（Concurrency）: 応答照合は `pending_map_.find()` で存在確認後に完了処理し、未知 ID は破棄すること。
+- R-021（API-Contract）: `serve_requests` 実行中の `receive()` / `send()` 直接呼び出しを禁止し、受信主体を単一化すること。
+- R-022（Spec-Consistency）: 「公開 API 不変更」と「内部フレーム実装更新」の境界を設計書で明示すること。
+- R-023（Spec-Consistency）: `RpcPipeServer` API 例の `stop()` 宣言を保持し、`run_in_background` と停止手段の契約を一致させること。
+- R-024（Spec-Quality）: 設計書の文字化け/誤字を除去し、技術用語を一貫した日本語へ正規化すること。
 
 ---
 

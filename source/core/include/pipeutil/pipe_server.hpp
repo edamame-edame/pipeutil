@@ -8,6 +8,7 @@
 #include <string>
 
 namespace pipeutil {
+namespace detail { class IPlatformPipe; }  // 前方宣言（内部コンストラクタで参照）
 
 // ──────────────────────────────────────────────────────────────────────────────
 // PipeServer — サーバー側: listen → accept → send/receive → close の順で使用
@@ -71,6 +72,16 @@ private:
     // pimpl イディオム: プラットフォーム依存実装を .cpp に隠蔽
     class Impl;
     std::unique_ptr<Impl> impl_;
+
+    // ─── 内部コンストラクタ（MultiPipeServer 専用）───────────────────
+    // accept 済みの IPlatformPipe インスタンスを直接受け取る。
+    // このコンストラクタを使うと listen()/accept() を呼ぶ必要がない。
+    friend class MultiPipeServer;
+    struct FromAcceptedTag {};
+    PipeServer(FromAcceptedTag,
+               std::string pipe_name,
+               std::size_t buffer_size,
+               std::unique_ptr<detail::IPlatformPipe> accepted);
 };
 
 } // namespace pipeutil

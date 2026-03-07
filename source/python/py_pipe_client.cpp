@@ -9,9 +9,10 @@
 
 namespace pyutil {
 
-static std::chrono::milliseconds to_ms_c(double sec) noexcept {
-    if (sec <= 0.0) return std::chrono::milliseconds{0};
-    return std::chrono::milliseconds{static_cast<int64_t>(sec * 1000.0)};
+// タイムアウト値はミリ秒単位で受け取る（Python API 規約: timeout_msec 整数 or float）
+static std::chrono::milliseconds to_ms_c(double ms_val) noexcept {
+    if (ms_val <= 0.0) return std::chrono::milliseconds{0};
+    return std::chrono::milliseconds{static_cast<int64_t>(ms_val)};
 }
 
 static bool check_client(PyPipeClient* self) noexcept {

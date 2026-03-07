@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace pipeutil::detail {
@@ -30,6 +31,16 @@ public:
     /// timeout_ms == 0 → 無限待機
     /// 例外: PipeException (Timeout / SystemError)
     virtual void server_accept(int64_t timeout_ms) = 0;
+
+    /// クライアント接続を待機し、接続済みパイプを別インスタンスとして返す（fork）。
+    /// 自身は次クライアントを受け付けられる状態を維持する。
+    /// timeout_ms == 0 → 無限待機
+    /// 例外: PipeException (Timeout / Interrupted / SystemError)
+    virtual std::unique_ptr<IPlatformPipe> server_accept_and_fork(int64_t timeout_ms) = 0;
+
+    /// 進行中の server_accept_and_fork() を非同期的に中断させる（noexcept）。
+    /// 呼び出し後、実行中の server_accept_and_fork() は Interrupted を送出して返る。
+    virtual void stop_accept() noexcept = 0;
 
     /// サーバー側リソースを解放する（noexcept）
     virtual void server_close() noexcept = 0;

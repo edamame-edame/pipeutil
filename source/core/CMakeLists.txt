@@ -5,6 +5,7 @@ set(CORE_SOURCES
     src/io_buffer.cpp
     src/pipe_server.cpp
     src/pipe_client.cpp
+    src/multi_pipe_server.cpp
     src/detail/crc32c.cpp
 )
 
@@ -44,12 +45,9 @@ target_compile_options(pipeutil_core PRIVATE
 )
 
 # ─── プラットフォーム依存リンク ───────────────────────────────────────
-if(WIN32)
-    # Win32 API は自動リンクされるため追加設定不要
-else()
-    find_package(Threads REQUIRED)
-    target_link_libraries(pipeutil_core PRIVATE Threads::Threads)
-endif()
+# std::thread / std::counting_semaphore が pthread を使う環境（Linux 等）に対応
+find_package(Threads REQUIRED)
+target_link_libraries(pipeutil_core PRIVATE Threads::Threads)
 
 # ─── バージョン情報 ───────────────────────────────────────────────────
 set_target_properties(pipeutil_core PROPERTIES
