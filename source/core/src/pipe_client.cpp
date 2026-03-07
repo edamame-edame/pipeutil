@@ -3,14 +3,10 @@
 #include "pipeutil/pipe_client.hpp"
 #include "pipeutil/pipe_error.hpp"
 #include "pipeutil/message.hpp"
-#include "pipeutil/detail/frame_header.hpp"
-#include "pipeutil/detail/endian.hpp"
-#include "detail/crc32c.hpp"
+#include "detail/frame_io.hpp"          // send_frame / recv_frame 共通実装 (F-002)
 #include "detail/platform_factory.hpp"
 
 #include <mutex>
-#include <cstring>
-#include <limits>
 
 namespace pipeutil {
 
@@ -33,12 +29,12 @@ public:
 
     void send(const Message& msg) {
         std::lock_guard<std::mutex> lk(io_mutex_);
-        send_frame(msg);
+        detail::send_frame(*platform_, msg);
     }
 
     Message receive(std::chrono::milliseconds timeout) {
         std::lock_guard<std::mutex> lk(io_mutex_);
-        return recv_frame(timeout.count());
+        return detail::recv_frame(*platform_, timeout.count()).message;
     }
 
     [[nodiscard]] bool is_connected() const noexcept {
@@ -53,63 +49,7 @@ private:
     std::string                            pipe_name_;
     std::unique_ptr<detail::IPlatformPipe> platform_;
     std::mutex                             io_mutex_;
-
-    void send_frame(const Message& msg) {
-        const auto payload = msg.payload();
-        // payload が uint32_t の最大値を超えていないことを検査する (R-014)
-        if (payload.size() > static_cast<std::size_t>(std::numeric_limits<uint32_t>::max())) {
-            throw PipeException{PipeErrorCode::Overflow,
-                                "Payload size exceeds uint32_t maximum (4 GiB-1)"};
-        }
-        const auto psz = static_cast<uint32_t>(payload.size());
-        const uint32_t crc = payload.empty()
-                               ? 0u
-                               : detail::compute_crc32c(payload);
-
-        detail::FrameHeader hdr{};
-        std::memcpy(hdr.magic, detail::MAGIC, 4);
-        hdr.version      = detail::PROTOCOL_VERSION;
-        hdr.flags        = 0x00;
-        hdr.reserved[0]  = 0x00;
-        hdr.reserved[1]  = 0x00;
-        hdr.payload_size = detail::to_le32(psz);
-        hdr.checksum     = detail::to_le32(crc);
-
-        platform_->write_all(reinterpret_cast<const std::byte*>(&hdr),
-                              sizeof(hdr));
-        if (!payload.empty()) {
-            platform_->write_all(payload.data(), payload.size());
-        }
-    }
-
-    Message recv_frame(int64_t timeout_ms) {
-        detail::FrameHeader hdr{};
-        platform_->read_all(reinterpret_cast<std::byte*>(&hdr),
-                            sizeof(hdr), timeout_ms);
-
-        if (std::memcmp(hdr.magic, detail::MAGIC, 4) != 0) {
-            throw PipeException{PipeErrorCode::InvalidMessage, "Invalid magic bytes"};
-        }
-        if (hdr.version != detail::PROTOCOL_VERSION) {
-            throw PipeException{PipeErrorCode::InvalidMessage, "Unsupported protocol version"};
-        }
-
-        const uint32_t psz          = detail::from_le32(hdr.payload_size);
-        const uint32_t expected_crc = detail::from_le32(hdr.checksum);
-
-        if (psz == 0) return Message{};
-
-        std::vector<std::byte> buf(psz);
-        platform_->read_all(buf.data(), psz, timeout_ms);
-
-        const uint32_t computed_crc = detail::compute_crc32c(
-            std::span<const std::byte>{buf.data(), buf.size()});
-        if (computed_crc != expected_crc) {
-            throw PipeException{PipeErrorCode::InvalidMessage, "CRC-32C mismatch"};
-        }
-
-        return Message{std::span<const std::byte>{buf.data(), buf.size()}};
-    }
+    // フレーム送受信ロジックは detail::send_frame / detail::recv_frame (frame_io.hpp) に集約
 };
 
 // ─── PipeClient 公開 API ──────────────────────────────────────────

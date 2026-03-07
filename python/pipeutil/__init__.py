@@ -7,6 +7,8 @@ from ._pipeutil import (       # noqa: F401 — re-export
     PipeServer,
     PipeClient,
     MultiPipeServer,
+    RpcPipeClient,
+    RpcPipeServer,
     PipeError,
     TimeoutError,
     ConnectionResetError,
@@ -20,6 +22,8 @@ __all__ = [
     "PipeServer",
     "PipeClient",
     "MultiPipeServer",
+    "RpcPipeClient",
+    "RpcPipeServer",
     "PipeError",
     "TimeoutError",
     "ConnectionResetError",
@@ -28,4 +32,4 @@ __all__ = [
     "InvalidMessageError",
 ]
 
-__version__: str = "0.1.0"
+__version__: str = "0.2.0"

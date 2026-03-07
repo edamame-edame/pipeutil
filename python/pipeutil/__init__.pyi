@@ -152,6 +152,105 @@ class PipeClient:
         """設定したパイプ識別名。"""
         ...
 
+# ─── RpcPipeClient ───────────────────────────────────────────────────
+
+from collections.abc import Callable
+
+class RpcPipeClient:
+    """RPC 対応パイプクライアント。send_request() でリクエスト/レスポンス型通信を行う。
+
+    ライフサイクル: ``connect()`` → ``send_request()`` / ``send()`` / ``receive()`` → ``close()``
+    """
+
+    def __init__(self, pipe_name: str, buffer_size: int = 65536) -> None: ...
+
+    def connect(self, timeout: float = 0.0) -> None:
+        """サーバーに接続し、背景受信スレッドを起動する。"""
+        ...
+
+    def close(self) -> None:
+        """背景スレッドを停止し接続を閉じる。"""
+        ...
+
+    def send(self, msg: Message) -> None:
+        """通常フレームを送信する（message_id=0, flags=0）。"""
+        ...
+
+    def receive(self, timeout: float = 0.0) -> Message:
+        """通常受信キューからメッセージを取り出す。"""
+        ...
+
+    def send_request(self, message: Message, timeout: float = 5.0) -> Message:
+        """RPC リクエストを送信し、レスポンスを返す。
+
+        Parameters
+        ----------
+        message:
+            送信するリクエストメッセージ。
+        timeout:
+            秒単位のタイムアウト。0.0 = 無限待機。
+
+        Raises
+        ------
+        TimeoutError
+            レスポンスが timeout 以内に届かなかった。
+        ConnectionResetError
+            待機中に接続が切断された。
+        """
+        ...
+
+    def is_connected(self) -> bool:
+        """接続中で受信スレッドが稼働中なら ``True``。"""
+        ...
+
+    def pipe_name(self) -> str:
+        """設定したパイプ識別名。"""
+        ...
+
+
+# ─── RpcPipeServer ───────────────────────────────────────────────────
+
+class RpcPipeServer:
+    """RPC 対応パイプサーバー。serve_requests(handler) でリクエスト/レスポンス型通信を行う。
+
+    ライフサイクル: ``listen()`` → ``accept()`` → ``serve_requests()`` → ``stop()`` → ``close()``
+    """
+
+    def __init__(self, pipe_name: str, buffer_size: int = 65536) -> None: ...
+
+    def listen(self) -> None: ...
+    def accept(self, timeout: float = 0.0) -> None: ...
+    def close(self) -> None: ...
+    def stop(self) -> None:
+        """serve_requests の背景スレッドを停止する。"""
+        ...
+
+    def send(self, msg: Message) -> None: ...
+    def receive(self, timeout: float = 0.0) -> Message: ...
+
+    def serve_requests(
+        self,
+        handler: Callable[[Message], Message],
+        run_in_background: bool = False,
+    ) -> None:
+        """受信ループを開始する。
+
+        Parameters
+        ----------
+        handler:
+            リクエストを受け取りレスポンスを返す callable。
+        run_in_background:
+            ``True`` なら背景スレッドで実行（即時返却）。
+            ``False`` なら呼び出し元スレッドで実行（ブロッキング）。
+        """
+        ...
+
+    def is_listening(self) -> bool: ...
+    def is_connected(self) -> bool: ...
+    def is_serving(self) -> bool: ...
+    def pipe_name(self) -> str: ...
+
+
 # ─── 例外階層 ─────────────────────────────────────────────────────────
 
 class PipeError(Exception):

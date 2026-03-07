@@ -6,6 +6,8 @@ set(CORE_SOURCES
     src/pipe_server.cpp
     src/pipe_client.cpp
     src/multi_pipe_server.cpp
+    src/rpc_pipe_client.cpp
+    src/rpc_pipe_server.cpp
     src/detail/crc32c.cpp
 )
 
