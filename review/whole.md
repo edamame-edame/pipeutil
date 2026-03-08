@@ -1,20 +1,20 @@
 # レビュー集約（whole）
 
-最終更新: 2026-03-07 21:00:00
-最新レビューCSV: review/20260228021228.csv
+最終更新: 2026-03-08 12:35:32
+最新レビューCSV: review/20260308123532.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 0
-- 今回再レビューでの新規指摘（Medium 以上）: 0
+- 未修正指摘数（Medium 以上）: 4
+- 今回再レビューでの新規指摘（Medium 以上）: 4
 - 修正確認済み指摘数: 27（詳細は削除し、注意点へ集約）
 - ビルド確認:
   - CMake Tools（Visual Studio 17 2022 / Release）: ✅ ビルド成功
   - Python 3.14 wheel (`cp314-win_amd64`): ✅ ビルド成功
-- テスト結果（F-001 実装後）:
-  - C++ (CTest): ✅ 38/38 PASS（33 既存 + 5 新規 MultiPipeServer）
-  - Python (pytest): ✅ 22/22 PASS（19 既存 + 3 新規 MultiPipeServer）
-- GitHub: ✅ https://github.com/edamame-edame/pipeutil.git（cc5e056: feat(F-001)）
+- テスト結果（F-002 実装後）:
+  - C++ (CTest): ✅ 45/45 PASS
+  - Python (pytest): ✅ 25/25 PASS
+- GitHub: ✅ https://github.com/edamame-edame/pipeutil.git（c30e0fd: docs(F-004)）
 
 ---
 
@@ -52,7 +52,41 @@
 
 ## 3. 未修正指摘（Medium 以上）
 
-なし（全件修正確認済み）
+### R-029（High, Spec-Consistency）
+
+**指摘**: `ProcessPipeServer` の設計説明が二重化しており、接続モデルが矛盾している（接続転送を使う設計 vs `WorkerPipeClient` が同一 `pipe_name` に直接接続）。
+→ `ProcessPipeServer` の docstring を「ハンドシェイクパイプパターン」に統一し、「WorkerPipeClient 経由にしない」という記述を削除。§5.2 の内部動作フローを §5.3 のフロー図と一致させた。✅
+
+**根拠**: [spec/F004_async_threading_multiprocessing.md](../spec/F004_async_threading_multiprocessing.md#L520-L525) では「WorkerPipeClient 経由にしない」と記載する一方、[spec/F004_async_threading_multiprocessing.md](../spec/F004_async_threading_multiprocessing.md#L592-L608) では `WorkerPipeClient("my_pipe_worker_N").connect()` を要求している。
+
+**対応状況**: 未修正
+
+### R-030（Medium, API-Contract）
+
+**指摘**: `serve_connections` の docstring が `stop_event` 前提なのに関数シグネチャに停止手段が存在しない。
+→ `stop_event: asyncio.Event | None = None` を `serve_connections()` の引数に追加し、docstring と使用例も `stop_event=stop` を渡す形に更新した。✅
+
+**根拠**: [spec/F004_async_threading_multiprocessing.md](../spec/F004_async_threading_multiprocessing.md#L313-L323) で「`stop_event` が set されるまで動き続ける」とあるが、関数引数に `stop_event` がない。
+
+**対応状況**: 未修正
+
+### R-031（Medium, Platform-Contract）
+
+**指摘**: Windows セクションで「接続→fork→子プロセス引継ぎ」を可能と記述しているが、Windows には `fork` がない。
+→ §5.4 の記述を「接続 → subprocess.Popen (spawn) → DuplicateHandle で子プロセスへ引き継ぐ」に修正し、「Windows には POSIX fork がないため DuplicateHandle + スポーン方式を使う」旨を明記した。✅
+
+**根拠**: [spec/F004_async_threading_multiprocessing.md](../spec/F004_async_threading_multiprocessing.md#L661-L664) の本文が `fork` 前提になっている。
+
+**対応状況**: 未修正
+
+### R-032（Medium, Spec-Inconsistency）
+
+**指摘**: プロジェクト基準（Python3.13）と異なり、仕様が Python 3.9 以上/3.8 フォールバックを前提にしている。
+→ §6.1 テーブルを Python 3.13 前提で書き直し、3.8/3.9 フォールバック記述を削除。目標バージョンを「Python 3.13 以上」へ変更、CI 表記も更新。§9 の `aio.py` 冒頭コードも `(3, 13)` チェックに修正した。✅
+
+**根拠**: [AGENTS.md](../AGENTS.md) の基準と、[spec/F004_async_threading_multiprocessing.md](../spec/F004_async_threading_multiprocessing.md#L697-L704) および [spec/F004_async_threading_multiprocessing.md](../spec/F004_async_threading_multiprocessing.md#L875-L883) の記述が不一致。
+
+**対応状況**: 未修正
 
 ---
 

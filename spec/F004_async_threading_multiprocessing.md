@@ -301,7 +301,7 @@ public:
     // Linux:   fd を返す (SelectorEventLoop に登録)
     [[nodiscard]] native_handle_t native_handle() const noexcept;
 
-    void cancel() noexcept;  // CoocelIoEx / io_uring_cancel
+    void cancel() noexcept;  // CancelIoEx / io_uring_cancel
     void close() noexcept;
 };
 ```
@@ -316,10 +316,11 @@ async def serve_connections(
     handler: Callable[[AsyncPipeServer], Awaitable[None]],
     max_connections: int = 8,
     buffer_size: int = 65536,
+    stop_event: asyncio.Event | None = None,
 ) -> None:
     """
     接続ごとに asyncio.create_task(handler(conn)) を起動する接続受付ループ。
-    stop_event が set されるまで動き続ける。
+    stop_event が set されるまで動き続ける（None の場合は task.cancel() で停止）。
 
     例:
         stop = asyncio.Event()
@@ -327,7 +328,7 @@ async def serve_connections(
             msg = await conn.receive()
             await conn.send(Message(b'pong'))
 
-        await pipeutil.aio.serve_connections("my_pipe", on_connect)
+        await pipeutil.aio.serve_connections("my_pipe", on_connect, stop_event=stop)
     """
 ```
 
@@ -529,17 +530,16 @@ class WorkerPipeClient:
 class ProcessPipeServer:
     """
     接続ごとに別プロセスを起動するサーバー（重い処理の CPU バインドな分離に有効）。
-    子プロセスは WorkerPipeClient 経由でサーバーパイプに接続する設計にはせず、
-    専用の「接続転送」メカニズムを使う。
 
-    内部動作:
-      1. メインプロセス: MultiPipeServer で接続を受け付ける
-      2. 接続ごとに子プロセスを spawn
-      3. 子プロセスに pipe_name を渡し、子プロセスが独自のサーバーパイプを作成する
-         （接続を転送する専用ハンドシェイクパイプ経由）
+    接続モデル（ハンドシェイクパイプパターン）:
+      1. メインプロセス: ワーカー用名前付きパイプ "pipe_N" を listen する
+      2. 接続ごとに子プロセスを spawn し "pipe_N" を引数として渡す
+      3. 子プロセスは WorkerPipeClient("pipe_N") で接続し HELLO フレームを送信
+      4. メインプロセスは ACK を返し、以降は子プロセス専任で処理する
 
-    注意: Windows のハンドル継承 (DuplicateHandle) を用いる上級 API は
-          Phase 2 で提供する（§5.4 参照）。
+    注意: Windows ハンドル継承 (DuplicateHandle) を使った Phase 2 API とは別物。
+          本クラスは常に spawn + WorkerPipeClient ハンドシェイクを使う。
+          Phase 2 は §5.4 参照。
     """
 
     def __init__(
@@ -648,7 +648,8 @@ if pid == 0:
 ### 5.4 Phase 2: Windows DuplicateHandle 継承（高度 API）
 
 Windows では `DuplicateHandle` で接続済みパイプハンドルを子プロセスに継承できる。
-これにより「接続 → fork → 子プロセスで既存接続を引き継ぐ」が可能になる。
+これにより「接続 → subprocess.Popen (spawn) → DuplicateHandle で子プロセスへ引き継ぐ」が可能になる。
+（Windows には POSIX `fork` がないため、ハンドル継承は DuplicateHandle + スポーン方式を使う。）
 
 ```cpp
 // C++ Phase 2: ハンドル継承 API
@@ -695,13 +696,13 @@ class InheritedPipeClient:
 
 | 機能 | 最低 Python バージョン | 備考 |
 |---|---|---|
-| `asyncio.to_thread()` (Phase 1) | 3.9 | 3.8 は `loop.run_in_executor()` にフォールバック |
-| `asyncio.TaskGroup` | 3.11 | 非必須（`asyncio.gather` で代替） |
+| `asyncio.to_thread()` (Phase 1) | 3.9 | Python 3.13 必須のため本プロジェクトでは常に利用可 |
+| `asyncio.TaskGroup` | 3.11 | 非必須（`asyncio.gather` で代替可能） |
 | `concurrent.futures` | 3.2 | 既存サポート範囲内 |
 | `multiprocessing.spawn` | 全バージョン | デフォルトはバージョン・OS 依存 |
-| Phase 2 IOCP 統合 | 3.9 以上推奨 | `ProactorEventLoop` は 3.8 でも使用可 |
+| Phase 2 IOCP 統合 | 3.9 以上推奨 | Python 3.13 必須のため常に利用可 |
 
-目標: **Python 3.9 以上**（CI は 3.9 / 3.11 / 3.13 で実施）
+目標: **Python 3.13 以上**（CI は 3.13 で実施、将来 3.14 を追加予定）
 
 ### 6.2 パフォーマンス目標（Phase 2 以降）
 
@@ -865,14 +866,13 @@ asyncio_mode = "auto"   # @pytest.mark.asyncio を自動付与
 ```python
 # aio.py の冒頭
 import sys
-if sys.version_info < (3, 9):
-    raise ImportError("pipeutil.aio requires Python 3.9 or later")
+import asyncio
+if sys.version_info < (3, 13):
+    raise ImportError("pipeutil.aio requires Python 3.13 or later")
 
-try:
-    import asyncio.to_thread  # type: ignore[attr-defined]
-    _HAS_TO_THREAD = True
-except AttributeError:
-    _HAS_TO_THREAD = False
+# asyncio.to_thread は 3.9+ で利用可能。3.13 必須のため常に True だが、
+# 将来の API 変更に備えて hasattr で確認する。
+_HAS_TO_THREAD: bool = hasattr(asyncio, "to_thread")
 ```
 
 ---
