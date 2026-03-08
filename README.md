@@ -17,3 +17,5 @@ This project uses a two-tier CI strategy:
 	- Goal: full compatibility coverage across supported versions
 
 Before release, run `nightly.yml` manually with `workflow_dispatch` and confirm full-matrix green.
+
+For detailed CI operation rules and merge criteria, see [CONTRIBUTING.md §7](CONTRIBUTING.md#7-ci-で何が動くか).
