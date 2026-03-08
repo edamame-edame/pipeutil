@@ -1,0 +1,2 @@
+id,severity,category,file,line,issue,impact,recommendation,evidence,status
+R-032,Medium,Spec-Inconsistency,spec/F004_async_threading_multiprocessing.md,219,プロジェクト基準（Python3.13）と異なり 3.8 フォールバックを示す記述が仕様内に残存している,サポート範囲が再び曖昧化し実装者が不要な分岐を追加する恐れがある,Python 3.13 必須方針に合わせて該当コメントを削除または 3.13 前提の記述へ置換する,§3.3 の AsyncPipeClient.connect サンプルに「Python 3.9+、3.8 は run_in_executor にフォールバック」と残っている,Open

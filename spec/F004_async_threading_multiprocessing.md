@@ -696,13 +696,13 @@ class InheritedPipeClient:
 
 | 機能 | 最低 Python バージョン | 備考 |
 |---|---|---|
-| `asyncio.to_thread()` (Phase 1) | 3.9 | Python 3.13 必須のため本プロジェクトでは常に利用可 |
+| `asyncio.to_thread()` (Phase 1) | 3.9 | 3.8 は `loop.run_in_executor()` にフォールバック |
 | `asyncio.TaskGroup` | 3.11 | 非必須（`asyncio.gather` で代替可能） |
 | `concurrent.futures` | 3.2 | 既存サポート範囲内 |
 | `multiprocessing.spawn` | 全バージョン | デフォルトはバージョン・OS 依存 |
-| Phase 2 IOCP 統合 | 3.9 以上推奨 | Python 3.13 必須のため常に利用可 |
+| Phase 2 IOCP 統合 | 3.9 以上推奨 | 3.8 では `ProactorEventLoop` + スレッド委譲を併用 |
 
-目標: **Python 3.13 以上**（CI は 3.13 で実施、将来 3.14 を追加予定）
+目標: **Python 3.8 〜 3.14**（CI は 3.8 / 3.11 / 3.13 / 3.14 で実施）
 
 ### 6.2 パフォーマンス目標（Phase 2 以降）
 
@@ -867,11 +867,10 @@ asyncio_mode = "auto"   # @pytest.mark.asyncio を自動付与
 # aio.py の冒頭
 import sys
 import asyncio
-if sys.version_info < (3, 13):
-    raise ImportError("pipeutil.aio requires Python 3.13 or later")
+if sys.version_info < (3, 8):
+    raise ImportError("pipeutil.aio requires Python 3.8 or later")
 
-# asyncio.to_thread は 3.9+ で利用可能。3.13 必須のため常に True だが、
-# 将来の API 変更に備えて hasattr で確認する。
+# asyncio.to_thread は 3.9+ で利用可能。3.8 は run_in_executor フォールバック。
 _HAS_TO_THREAD: bool = hasattr(asyncio, "to_thread")
 ```
 

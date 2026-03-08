@@ -1,0 +1,2 @@
+id,severity,category,file,line,issue,impact,recommendation,evidence,status
+R-032,Medium,Spec-Inconsistency,AGENTS.md|spec/F004_async_threading_multiprocessing.md,3|699-705|868-874,プロジェクト基準とF-004仕様のPythonサポート範囲不一致（3.13固定 vs 3.8-3.14対応方針）,旧基準のままではレビュー判定と実装方針が乖離し要件解釈が揺れる,基準ドキュメントを3.8-3.14へ更新しF-004のバージョン要件・フォールバック記述と統一する,AGENTS.mdをPython3.8-3.14へ更新しF-004 §6.1と§9コード例を同方針へ修正済み,Resolved
