@@ -276,6 +276,8 @@ cmake --build build/asan --parallel
 
 ## 8. CI/CD マトリクス（GitHub Actions 想定）
 
+運用ルール（PR 高速系 / nightly フル系）の詳細は `CONTRIBUTING.md` の「7. CI で何が動くか」を参照。
+
 | OS | コンパイラ | Python | BUILD_TYPE |
 |----|-----------|--------|------------|
 | Windows Server 2022 | MSVC 2022 | 3.8 | Release |
