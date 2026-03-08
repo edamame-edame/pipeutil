@@ -5,7 +5,6 @@
 #
 # トリガー:
 #   - 毎日 UTC 02:00 自動実行
-#   - master / main への push 時（任意でコメントアウト可）
 #   - workflow_dispatch による手動実行
 #
 # 役割分担:

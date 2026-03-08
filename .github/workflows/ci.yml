@@ -5,7 +5,7 @@
 #   Linux  : Python 3.8, 3.11, 3.14
 #
 # フルマトリクス（3.8/3.11/3.13/3.14 × 両OS）は nightly.yml で実施する。
-# リリースタグ push 時は release ブランチ扱いとしてフルマトリクスに昇格。
+# リリース前は nightly.yml を workflow_dispatch で手動実行してフル検証する。
 name: CI
 
 on:
