@@ -19,7 +19,7 @@ C++ ネイティブコードをコアとして実装し、Python C API ラッパ
 
 | 項目 | 方針 |
 |------|------|
-| 言語標準 | C++20 / Python 3.13 |
+| 言語標準 | C++20 / Python 3.8 - 3.14 |
 | バイナリ形式 | Windows: `.dll` + `.lib`、Linux: `.so` |
 | Python バインディング | Python C API 拡張モジュール（`_pipeutil.pyd` / `_pipeutil.so`） |
 | 通信トランスポート | Windows: 名前付きパイプ (`\\.\pipe\<name>`)、Linux: UNIX ドメインソケット (`/tmp/pipeutil/<name>.sock`) |
@@ -186,7 +186,7 @@ pipeutil/
 | C++ 標準ライブラリ (C++20) | コア実装 | 必須 |
 | `<windows.h>` | Windows パイプ API | Windows 必須 |
 | POSIX (`<sys/socket.h>` 等) | Linux UDS | Linux 必須 |
-| Python 3.13 ヘッダ (`Python.h`) | Python C API 拡張 | Python バインディング必須 |
+| Python 3.8 - 3.14 ヘッダ (`Python.h`) | Python C API 拡張 | Python バインディング必須 |
 | CMake ≥ 3.25 | ビルドシステム | 必須 |
 | Google Test | C++ 単体テスト | オプション（開発用） |
 | pytest | Python テスト | オプション（開発用） |

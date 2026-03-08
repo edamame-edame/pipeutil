@@ -20,7 +20,7 @@
 | CMake | ≥ 3.25 | |
 | Visual Studio | 2022 (17) | Windows のみ |
 | GCC / Clang | C++20 対応 | Linux のみ |
-| Python | 3.13+ | |
+| Python | 3.8 - 3.14 | |
 | Git | 任意 | |
 
 **リポジトリのクローン**

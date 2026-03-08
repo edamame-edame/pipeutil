@@ -424,4 +424,4 @@ static void PyPipeServer_dealloc(PyPipeServer* self) {
 | 新規 `PyObject*` 生成 | 参照カウント = 1（所有権あり） |
 | 関数から返す `PyObject*` | `Py_INCREF` 不要（所有権を呼び出し元に移譲） |
 | 例外時に `return nullptr` | `Py_XDECREF` で保有オブジェクトを解放してから返す |
-| `PyModule_AddObject` | 参照を**盗む**（steal）ため呼び出し前に `Py_INCREF` 必須。失敗時に参照リークを防ぐには呼び出し後に `Py_XDECREF` が必要。Python 3.13 では **`PyModule_AddObjectRef`（非 steal, Python 3.10+）を使用推奨**。 |
+| `PyModule_AddObject` | 参照を**盗む**（steal）ため呼び出し前に `Py_INCREF` 必須。失敗時に参照リークを防ぐには呼び出し後に `Py_XDECREF` が必要。**`PyModule_AddObjectRef`（非 steal, Python 3.10+）を使用推奨**。 |

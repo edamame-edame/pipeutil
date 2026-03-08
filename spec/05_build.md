@@ -67,7 +67,7 @@ endif()
 add_subdirectory(core)
 
 if(PIPEUTIL_BUILD_PYTHON)
-    find_package(Python3 3.13 REQUIRED COMPONENTS Interpreter Development.Module)
+    find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter Development.Module)
     add_subdirectory(python)
 endif()
 ```
@@ -242,7 +242,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "pipeutil"
 version = "0.1.0"
-requires-python = ">=3.13"
+requires-python = ">=3.8,<3.15"
 description = "High-speed IPC pipe communication library"
 
 [tool.scikit-build]
@@ -278,10 +278,10 @@ cmake --build build/asan --parallel
 
 | OS | コンパイラ | Python | BUILD_TYPE |
 |----|-----------|--------|------------|
-| Windows Server 2022 | MSVC 2022 | 3.13 | Release |
-| Ubuntu 24.04 | GCC 13 | 3.13 | Release |
+| Windows Server 2022 | MSVC 2022 | 3.8 | Release |
+| Ubuntu 24.04 | GCC 13 | 3.11 | Release |
 | Ubuntu 24.04 | Clang 17 | 3.13 | Release |
-| Ubuntu 24.04 | GCC 13 | 3.13 | Debug + ASan |
+| Ubuntu 24.04 | GCC 13 | 3.14 | Debug + ASan |
 
 ---
 
@@ -290,6 +290,6 @@ cmake --build build/asan --parallel
 | 依存 | バージョン要件 | 取得方法 |
 |------|------------|---------|
 | CMake | ≥ 3.25 | システムパッケージ / 公式インストーラ |
-| Python 3.13 | = 3.13.x | システム Python / pyenv |
+| Python 3.8 - 3.14 | >=3.8, <3.15 | システム Python / pyenv |
 | scikit-build-core | ≥ 0.9 | `pip install scikit-build-core` |
 | Google Test | ≥ 1.14 | `FetchContent` (CMake) |
