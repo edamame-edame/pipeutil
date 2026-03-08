@@ -148,35 +148,36 @@ with client:
 
 ---
 
-### F-004 — Python asyncio 対応
+### F-004 — asyncio / threading / multiprocessing 対応
+
+> **詳細設計書**: [`spec/F004_async_threading_multiprocessing.md`](../spec/F004_async_threading_multiprocessing.md)
 
 #### 背景・課題
-現在すべての I/O がスレッドブロッキング。`asyncio` アプリケーションに組み込む際は
-`loop.run_in_executor()` のボイラープレートが必要で使い勝手が悪い。
+現在すべての I/O がスレッドブロッキング。また C拡張オブジェクトが pickle 不可のため
+`multiprocessing.spawn` コンテキストでの使用に制約がある。
 
-#### 提案 API
+#### 対応領域
 
-```python
-async with pipeutil.AsyncPipeServer("my_pipe") as server:
-    await server.listen()
-    await server.accept(timeout_ms=10000)
-    msg = await server.receive(timeout_ms=5000)
-    await server.send(pipeutil.Message(b"pong"))
+| 領域 | 主要クラス |
+|---|---|
+| asyncio | `AsyncPipeClient`, `AsyncPipeServer`, `AsyncRpcPipeClient`, `AsyncRpcPipeServer`, `serve_connections()` |
+| threading | `ThreadedPipeClient`, `ThreadedPipeServer`（`concurrent.futures.Future` 連携） |
+| multiprocessing | `WorkerPipeClient`, `ProcessPipeServer`, `spawn_worker_factory`（spawn/fork 両対応） |
 
-async with pipeutil.AsyncPipeClient("my_pipe") as client:
-    await client.connect(timeout_ms=3000)
-    await client.send(pipeutil.Message(b"ping"))
-    resp = await client.receive(timeout_ms=3000)
-```
+#### 実装フェーズ
 
-#### 実装方針（2段階）
-
-| フェーズ | 実装 | 備考 |
+| フェーズ | 内容 | C++ 変更 |
 |---|---|---|
-| Phase 1 | `asyncio.get_event_loop().run_in_executor()` でスレッドオフロード | 即時着手可能 |
-| Phase 2 | Windows: IOCP + `ProactorEventLoop` 直接統合 | 高スループット向け、C++ 変更あり |
+| Phase 1 (v0.4.0) | `asyncio.to_thread` + `threading_utils` + `mp`（Python ラッパーのみ） | なし |
+| Phase 2 (v0.5.0) | Windows IOCP / Linux io_uring ネイティブ統合 | あり |
 
-Phase 1 は Python ラッパーのみで実装可能なため、先行してリリースできる。
+Phase 1 の推奨実装順序: `mp.py` → `threading_utils.py` → `aio.py` → テスト全件 PASS
+
+#### 設計上の重要制約
+- `AsyncPipeClient` は 1インスタンス = 1イベントループに固定
+- spawn コンテキストでは C拡張オブジェクトは渡さず `pipe_name`（str）のみ渡す
+- fork は非推奨（RuntimeWarning を出す）、spawn を常に推奨
+- Phase 2 Windows では `ProactorEventLoop` が必須
 
 ---
 
@@ -319,13 +320,16 @@ explicit PipeServer(std::string pipe_name,
 ## 推奨着手順序
 
 ```
-v0.2.0: F-003（自動再接続）+ F-005（JSON/msgpack）+ F-007（テストスイート）
+v0.2.0: F-001（MultiPipeServer）+ F-002（message_id RPC）    ✅ 完了
+         → コア拡張、フレーム仕様変更
+
+v0.3.0: F-003（自動再接続）+ F-005（JSON/msgpack）+ F-006（メトリクス）
          → コア変更なし、品質基盤の確立
 
-v0.3.0: F-001（MultiPipeServer）+ F-002（message_id RPC）+ F-006（メトリクス）
-         → コア拡張、フレーム仕様変更を伴う
+v0.4.0: F-004 Phase 1（asyncio.to_thread + threading + multiprocessing spawn 対応）
+         → Python ラッパーのみ、C++ 変更なし
 
-v0.4.0: F-004（asyncio）+ F-008（Windows ACL）
+v0.5.0: F-004 Phase 2（IOCP / io_uring ネイティブ統合）+ F-008（Windows ACL）
          → 高度な I/O 統合、プラットフォーム固有対応
 ```
 
