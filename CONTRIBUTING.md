@@ -181,16 +181,35 @@ pytest tests/python/ -v
 
 ## 7. CI で何が動くか
 
-`.github/workflows/ci.yml` で以下が自動実行されます:
+CI は **PR 高速系（`ci.yml`）** と **夜間フルマトリクス（`nightly.yml`）** の 2 系統で運用します。
 
-| Job | トリガー | 内容 |
-|---|---|---|
-| `cpp-tests / windows-latest` | push / PR | CMake `vs-test` プリセット → CTest |
-| `cpp-tests / ubuntu-latest` | push / PR | Ninja Debug → CTest |
-| `python-tests / windows-latest` | push / PR | wheel ビルド → pytest |
-| `python-tests / ubuntu-latest` | push / PR | wheel ビルド → pytest |
+### PR 高速系（`ci.yml`）
+
+push / PR をトリガーに自動実行されます。**圧縮マトリクス**でフィードバックを高速化します。
+
+| Job | OS | Python | 内容 |
+|---|---|---|---|
+| `cpp-tests` | Windows / Linux | — | CMake Debug → CTest |
+| `python-tests` | Windows | 3.8, 3.14 | wheel ビルド → pytest |
+| `python-tests` | Linux | 3.8, 3.11, 3.14 | wheel ビルド → pytest |
 
 CI が赤のままの PR はマージできません。
+
+### 夜間フルマトリクス（`nightly.yml`）
+
+毎日 UTC 02:00 に自動実行されます。**全サポートバージョンの互換性を網羅検証**します。
+`workflow_dispatch` で手動実行も可能です。
+
+| Job | OS | Python | 内容 |
+|---|---|---|---|
+| `cpp-tests` | Windows / Linux | — | CMake Debug → CTest |
+| `python-tests` | Windows / Linux | 3.8, 3.11, 3.13, 3.14 | wheel ビルド → pytest |
+
+### 使い分け方針
+
+- PR マージ判断: PR 高速系がすべて green であること
+- リリース前: `nightly.yml` を手動実行（`workflow_dispatch`）してフルマトリクスを確認
+- 中間バージョン固有の不具合: nightly の失敗通知で検出
 
 ---
 

@@ -1,30 +1,33 @@
-# ci.yml — PR / push 高速チェック用ワークフロー
+# nightly.yml — 夜間フルマトリクス検証ワークフロー
 #
-# 実行マトリクス方針（parent_reviewer_proposal 提案A 採用）:
-#   Windows: Python 3.8, 3.14
-#   Linux  : Python 3.8, 3.11, 3.14
+# 実行マトリクス方針（parent_reviewer_proposal 提案B 採用）:
+#   Windows + Linux × Python 3.8 / 3.11 / 3.13 / 3.14
 #
-# フルマトリクス（3.8/3.11/3.13/3.14 × 両OS）は nightly.yml で実施する。
-# リリースタグ push 時は release ブランチ扱いとしてフルマトリクスに昇格。
-name: CI
+# トリガー:
+#   - 毎日 UTC 02:00 自動実行
+#   - master / main への push 時（任意でコメントアウト可）
+#   - workflow_dispatch による手動実行
+#
+# 役割分担:
+#   ci.yml     → PR の高速フィードバック（圧縮マトリクス）
+#   nightly.yml → 全サポートバージョンの互換性網羅検証
+name: Nightly Full Matrix
 
 on:
-  push:
-    branches: ["master", "main", "develop"]
-    tags:     ["v*"]
-  pull_request:
-    branches: ["master", "main", "develop"]
+  schedule:
+    - cron: "0 2 * * *"   # UTC 02:00 毎日
+  workflow_dispatch:       # 手動実行
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: nightly-${{ github.ref }}
   cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job 1: C++ ユニットテスト（OS のみマトリクス、版数は変わらないため圧縮不要）
+# Job 1: C++ ユニットテスト（ci.yml と同一 — 夜間でも健全性を維持）
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
   cpp-tests:
-    name: C++ Tests / ${{ matrix.os }}
+    name: "[Nightly] C++ Tests / ${{ matrix.os }}"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -34,12 +37,7 @@ jobs:
             preset_cfg: vs-test
             preset_build: build-test
             preset_test: run-test
-            build_cfg: Debug
           - os: ubuntu-latest
-            preset_cfg: linux-test
-            preset_build: build-linux-test
-            preset_test: run-linux-test
-            build_cfg: Debug
 
     steps:
       - uses: actions/checkout@v4
@@ -55,8 +53,6 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y cmake ninja-build gcc g++
-
-      # Windows: Visual Studio 17 2022 は runner に含まれる
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
@@ -88,29 +84,17 @@ jobs:
         run: ctest --test-dir build/linux-test --output-on-failure
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job 2: Python テスト（圧縮マトリクス）
-#   Windows: 3.8, 3.14  — 最小版 + 最新版
-#   Linux  : 3.8, 3.11, 3.14  — 最小版 + 中間代表 + 最新版
+# Job 2: Python テスト フルマトリクス
+#   Windows + Linux × 3.8 / 3.11 / 3.13 / 3.14
 # ─────────────────────────────────────────────────────────────────────────────
   python-tests:
-    name: Python Tests / ${{ matrix.os }} / py${{ matrix.python-version }}
+    name: "[Nightly] Python Tests / ${{ matrix.os }} / py${{ matrix.python-version }}"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Windows: 最小版 + 最新版
-          - os: windows-latest
-            python-version: "3.8"
-          - os: windows-latest
-            python-version: "3.14"
-          # Linux: 最小版 + 中間代表 + 最新版
-          - os: ubuntu-latest
-            python-version: "3.8"
-          - os: ubuntu-latest
-            python-version: "3.11"
-          - os: ubuntu-latest
-            python-version: "3.14"
+        os: [windows-latest, ubuntu-latest]
+        python-version: ["3.8", "3.11", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
