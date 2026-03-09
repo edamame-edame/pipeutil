@@ -1,20 +1,14 @@
 # レビュー集約（whole）
 
-最終更新: 2026-03-08 12:49:07
-最新レビューCSV: review/20260308124907.csv
+最終更新: 2026-03-10 05:45:07
+最新レビューCSV: review/20260310054507.csv
 
 ## 1. 最新レビューの要約
 
 - 未修正指摘数（Medium 以上）: 0
 - 今回再レビューでの新規指摘（Medium 以上）: 0
-- 修正確認済み指摘数: 32（詳細は削除し、注意点へ集約）
-- ビルド確認:
-  - CMake Tools（Visual Studio 17 2022 / Release）: ✅ ビルド成功
-  - Python 3.14 wheel (`cp314-win_amd64`): ✅ ビルド成功
-- テスト結果（F-002 実装後）:
-  - C++ (CTest): ✅ 45/45 PASS
-  - Python (pytest): ✅ 25/25 PASS
-- GitHub: ✅ https://github.com/edamame-edame/pipeutil.git（1118638: fix(F-004)）
+- 修正確認済み指摘数: 36（詳細は削除し、注意点へ集約）
+- 今回対象: F-005 仕様書レビュー（仕様整合・型/実装安全性観点）
 
 ---
 
@@ -52,6 +46,10 @@
 - R-031（Platform-Contract / F-004）: Windows 章では `fork` 前提を排除し、`subprocess.Popen(spawn) + DuplicateHandle` に統一すること。
 - R-032（Spec-Inconsistency / F-004）: Python サポート範囲はプロジェクト基準（3.8-3.14）と仕様本文（バージョン表・コード例・フォールバック）を常に一致させること。
 - R-033（Spec-Quality / F-004）: API 名・サンプル構文（`CancelIoEx` / `hasattr(asyncio, "to_thread")`）を実行可能な記法に維持すること。
+- R-034（Python-Packaging / F-005）: パッケージ内実装例の import は `from ._pipeutil import Message` に統一し、循環依存リスクを避けること。
+- R-035（Spec-Completeness / F-005）: テスト例で参照する補助関数（`_msgpack_unavailable()`）はサンプル内に定義を含めること。
+- R-036（Type-Contract / F-005）: `__init__.pyi` 追記時は `CodecError(PipeError)` を例外階層定義後に配置すること。
+- R-037（Spec-Quality / F-005）: 誤記（例: メモリ用語）を除去し、仕様の可読性を維持すること。
 
 ---
 

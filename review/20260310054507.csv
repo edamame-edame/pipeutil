@@ -1,0 +1,5 @@
+id,severity,category,file,line,issue,impact,recommendation,evidence,status
+R-034,Medium,Python-Packaging,spec/F005_structured_message.md,74-78,message_utils 実装例で `from pipeutil import Message` を使用しておりパッケージ内部 import 方針（相対 import）と不整合,実装時に循環 import や初期化順依存を誘発しうる,`from ._pipeutil import Message` に統一する,実装例を相対 import に修正済み,Resolved
+R-035,Low,Spec-Completeness,spec/F005_structured_message.md,625-636,テストコード例で `_msgpack_unavailable()` を参照するが定義が欠落,仕様サンプルをそのまま転記すると NameError が発生する,サンプル内にヘルパー定義を追加する,_msgpack_unavailable 関数を追記済み,Resolved
+R-036,Low,Type-Contract,spec/F005_structured_message.md,481-489,型スタブ追記位置の注意がなく `CodecError(PipeError)` を PipeError 定義前に挿入する誤実装リスクがある,__init__.pyi 更新時に順序不整合で型チェック/可読性を損なう,PipeError 定義後に追加する配置ルールを明記する,配置注記を追加済み,Resolved
+R-037,Low,Spec-Quality,spec/F005_structured_message.md,478,誤記 `メmodコピー` が残存,仕様読み手の解釈品質を低下させる,`メモリコピー` に修正する,誤記を修正済み,Resolved
