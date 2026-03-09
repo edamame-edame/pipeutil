@@ -1,0 +1,8 @@
+id,severity,category,file,line,issue,impact,basis,status
+R-038,Medium,Concurrency/Lifecycle,spec/F004p2_async_native.md,§3.3,dispatch thread の start/stop タイミングが本文中に未定義。connect() 後に開始するのか、コンストラクタで開始するのか、close() での join 必須かが不明確。,thread 完了を待たずに HANDLE が解放された場合 use-after-free となるリスク。,"ソフトウェア安全性（スレッドライフタイム管理の基本原則）",Resolved
+R-039,Medium,Python-CAPI,spec/F004p2_async_native.md,§3.3,dispatch thread → Python コールバック時の PyObject*（loop, future）の所有権（INCREF/DECREF 契約）が概略の注意事項にとどまり C++ 実装仕様として未明確。,参照カウント不整合による UAF またはリーク。既存 R-004 と同類。,"R-004（Python-CAPI 参照カウント規約）の継続監視",Resolved
+R-040,Medium,API-Contract,spec/F004p2_async_native.md,§4.1,server_create_and_accept が C++ で std::unique_ptr<AsyncPlatformPipe> を返すとき、Python 拡張側での PyAsyncPipeHandle へのラップ手順（tp_alloc → release → エラー時の後始末）が未記述。,ラップ手順が不明だと実装者がメモリリークまたは二重解放を引き起こすリスク。,"APIセーフな C 拡張設計の基本要件",Resolved
+R-041,Medium,Protocol-Correctness,spec/F004p2_async_native.md,§8,async_write_frame での CRC-32C 計算の主体（C++ 側）が未明記。読み取り側だけ記述されており書き込み側が抜けていた。,CRC なしで送信すると受信側が InvalidMessage を送出する。,"既存フレームプロトコルとの対称性（R-013 参照）",Resolved
+R-042,Low,Platform-Contract,spec/F004p2_async_native.md,§3.4,Linux の add_reader / add_writer は SelectorEventLoop 専用。Windows ProactorEventLoop では NotImplementedError が発生する旨の明示なし。,Windows で Linux 実装パスが誤って使われると実行時エラー。,"プラットフォーム契約の明示ルール（R-008 継続）",Resolved
+R-043,Low,Error-Policy,spec/F004p2_async_native.md,§3.3,dispatch thread が call_soon_threadsafe を呼ぶ際にループがクローズ済みだった場合（RuntimeError）のハンドリングが未定義。,未処理例外が dispatch thread を終了させ、PyErr が残存する可能性。,"R-007（エラー方針：例外処理の網羅）の継続",Resolved
+R-044,Low,Resource-Policy,spec/F004p2_async_native.md,§12.1,1 接続 = 1 dispatch thread の上限数が数値として未定義。リスク言及のみで境界値がなかった。,無制限にスレッドが生成されると OS リソース枯渇。,"ソフトウェア安全性（リソース上限の明示）",Resolved

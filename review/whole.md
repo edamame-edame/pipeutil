@@ -1,14 +1,14 @@
 # レビュー集約（whole）
 
-最終更新: 2026-03-10 05:45:07
-最新レビューCSV: review/20260310054507.csv
+最終更新: 2026-03-10 06:25:00
+最新レビューCSV: review/20260310062500.csv
 
 ## 1. 最新レビューの要約
 
 - 未修正指摘数（Medium 以上）: 0
-- 今回再レビューでの新規指摘（Medium 以上）: 0
-- 修正確認済み指摘数: 36（詳細は削除し、注意点へ集約）
-- 今回対象: F-005 仕様書レビュー（仕様整合・型/実装安全性観点）
+- 今回再レビューでの新規指摘（Medium 以上）: 4 件（R-038〜R-041）爆発検出 → 修正完了
+- 修正確認済み指摘数: 43（詳細は削除し、注意点へ集約）
+- 今回対象: F-004 Phase 2 仕様書レビュー（IOCP/epoll ネイティブ非同期 I/O 設計）
 
 ---
 
@@ -50,6 +50,13 @@
 - R-035（Spec-Completeness / F-005）: テスト例で参照する補助関数（`_msgpack_unavailable()`）はサンプル内に定義を含めること。
 - R-036（Type-Contract / F-005）: `__init__.pyi` 追記時は `CodecError(PipeError)` を例外階層定義後に配置すること。
 - R-037（Spec-Quality / F-005）: 誤記（例: メモリ用語）を除去し、仕様の可読性を維持すること。
+- R-038（Concurrency/Lifecycle / F-004p2）: dispatch thread の start（connect）/stop（close で join）タイミングを必ず明示すること。
+- R-039（Python-CAPI / F-004p2）: dispatch thread → asyncio コールバック時の PyObject*（loop, future）に INCREF/DECREF を対称に施すこと。
+- R-040（API-Contract / F-004p2）: server_create_and_accept の unique_ptr → PyAsyncPipeHandle ラップ手順（tp_alloc / release / エラー時後始末）を C 拡張実装前に確定すること。
+- R-041（Protocol-Correctness / F-004p2）: async_write_frame は C++ 内部で CRC-32C を計算し FrameHeader.checksum に嵌めて送信すること。
+- R-042（Platform-Contract / F-004p2）: add_reader/add_writer は SelectorEventLoop 専用。Windows の ProactorEventLoop では動作しない旨を必ず文書化すること。
+- R-043（Error-Policy / F-004p2）: call_soon_threadsafe が RuntimeError を送出した場合（ループクローズ済み）は PyErr_Clear + PIPELOG で処理すること。
+- R-044（Resource-Policy / F-004p2）: dispatch thread の上限数（64 接続ス v0.5.0）を数値として明示し、超過時は TooManyConnections を送出すること。
 
 ---
 
