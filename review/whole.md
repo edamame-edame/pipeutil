@@ -1,14 +1,14 @@
 # レビュー集約（whole）
 
-最終更新: 2026-03-10 06:25:00
-最新レビューCSV: review/20260310062500.csv
+最終更新: 2026-03-10 07:30:00
+最新レビューCSV: review/20260310065000.csv
 
 ## 1. 最新レビューの要約
 
 - 未修正指摘数（Medium 以上）: 0
-- 今回再レビューでの新規指摘（Medium 以上）: 4 件（R-038〜R-041）爆発検出 → 修正完了
+- 今回再レビューでの新規指摘（Medium 以上）: 4 件（R-045〜R-048）→ 全件対応済み
 - 修正確認済み指摘数: 43（詳細は削除し、注意点へ集約）
-- 今回対象: F-004 Phase 2 仕様書レビュー（IOCP/epoll ネイティブ非同期 I/O 設計）
+- 今回対象: F-004 Phase 2 仕様書レビュー（第2回、実装整合性観点）— 指摘対応完了
 
 ---
 
@@ -62,7 +62,33 @@
 
 ## 3. 未修正指摘（Medium 以上）
 
-- なし
+### R-045（Critical / Windows-IPC / F-004p2）
+**指摘**: IOCP モデル説明で `ReadFileEx(..., OVERLAPPED, nullptr)` と `GetQueuedCompletionStatus` を同時利用しているが API 契約上非整合。IOCP で使うべきは `ReadFile/WriteFile` + OVERLAPPED（Ex 系は APC/alertable wait 前提）。
+**影響**: 設計どおり実装すると完了通知を受け取れず読み書きがハングまたは未完了になる。
+**根拠**: Win32 API 契約（ReadFileEx は completion routine + alertable wait、IOCP は GQCS で回収）。
+**対応状況**: 未対応
+→ spec/F004p2_async_native.md §3.3 の IOCP ダイアグラムおよびフロー説明を `ReadFile(hPipe_, buf, N, nullptr, &ov_)` + GQCS 構成に全面修正。ReadFileEx の記述を削除。✅
+
+### R-046（High / Python-CAPI / F-004p2）
+**指摘**: 「dispatch thread 内で `Py_BEGIN_ALLOW_THREADS` / `Py_END_ALLOW_THREADS` を適切に扱う」とあるがこのマクロは“現在 GIL を保持しているスレッド”向け。純粋 C++ スレッドから Python C API を触る契約として不適切。
+**影響**: 誤実装時に未定義動作（クラッシュ/UAF/デッドロック）を招く。
+**根拠**: CPython C-API の GIL 契約（外部スレッドは `PyGILState_Ensure/Release` で入る）。
+**対応状況**: 未対応
+→ spec/F004p2_async_native.md §3.1 設計原則4を全面改訂。`Py_BEGIN/END_ALLOW_THREADS` の記述を削除し、dispatch thread は GIL 非保持の純粋 C++ スレッドであること・Python C API 呼び出し前に `PyGILState_Ensure()` / 完了後に `PyGILState_Release()` を使うことを明記。§3.3 ダイアグラムにも呼び出し手順を追記。✅
+
+### R-047（Medium / Timeout-Contract / F-004p2）
+**指摘**: `AsyncPipeClient.receive(timeout_ms=...)` の公開契約に対し native 側 `read_frame()` にタイムアウト入力が存在しない。`aio.py` 切り替え後に timeout_ms が実質無視される設計になっている。
+**影響**: Phase 1 と Phase 2 でタイムアウト挙動が不一致となり API 互換を破る。
+**根拠**: F-004 の既存 API 契約（timeout 引数）および「Phase 1/2 同一 API」方針。
+**対応状況**: 未対応
+→ spec/F004p2_async_native.md §5.2 `NativeAsyncPipe.read_frame()` に `timeout_ms: int = 0` 引数を追加。0=無制限待機、正値は `asyncio.wait_for` でラップして `pipeutil.TimeoutError` へ変換するコード例を追記。§6.2 `AsyncPipeClient.receive()` の native パスも `read_frame(timeout_ms)` に修正し timeout が透過されることを明示。✅
+
+### R-048（Medium / Spec-Consistency / F-004p2）
+**指摘**: `source/CMakeLists.txt` 例で `add_subdirectory(python_async)` を参照しているが、現リポジトリ構成は `source/python/`。本文と実際のディレクトリ構成が不一致。
+**影響**: 実装者が誤ったサブディレクトリ追加を行いビルド設定が破綻する。
+**根拠**: ワークスペース実構成（`source/python/CMakeLists.txt`）との整合要件。
+**対応状況**: 未対応
+→ spec/F004p2_async_native.md §7.1 の `add_subdirectory(python_async)` を削除し、既存 `source/python/CMakeLists.txt` に `_pipeutil_async` ターゲットを追加する形（§7.2 参照）に変更。コメントで理由を明記。✅
 
 ---
 

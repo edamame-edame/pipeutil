@@ -105,8 +105,11 @@ tests/python/
 
 3. **フレームプロトコル維持**：Phase 1 と同一の 20 バイト `FrameHeader`（magic / version / payload_size / checksum/CRC-32C / message_id）を非同期 I/O でも正確に実装する。
 
-4. **GIL 安全**：ディスパッチスレッド（Windows）でのコールバック内では必ず
-   `Py_BEGIN_ALLOW_THREADS` / `Py_END_ALLOW_THREADS` を適切に扱う。
+4. **GIL 安全**：dispatch thread は純粋な C++ スレッドであり、起動時点で GIL を保持して**いない**。
+   Python C API（`call_soon_threadsafe` 等）を呼ぶ直前に `PyGILState_Ensure()` で GIL を取得し、
+   使用後は `PyGILState_Release()` で解放すること（R-046 対応）。
+   `Py_BEGIN_ALLOW_THREADS` / `Py_END_ALLOW_THREADS` は「GIL を既に保持しているスレッドが一時的に手放す」用途であり、
+   外部 C++ スレッドから Python C API を呼ぶこのコンテキストには使用してはならない。
 
 ### 3.2 `AsyncPlatformPipe` クラス
 
@@ -234,11 +237,15 @@ private:
 │    → ループが閉じていた場合（RuntimeError）はログのみで無視（R-043）  │
 │                                                                   │
 │  async_read_frame():                                               │
-│    ① ReadFileEx(hPipe_, hdr_buf, 20, &ov_read_, nullptr)           │
-│    ② dispatch_thread_ が hdr 完了を受信                            │
-│    ③ magic/version/payload_size 検証後、ReadFileEx(payload_buf, N) │
-│    ④ dispatch_thread_ が payload 完了を受信 → CRC-32C 検証         │
-│    ⑤ loop_.call_soon_threadsafe(cb, error_code, payload_bytes)     │
+│    ① ReadFile(hPipe_, hdr_buf, 20, nullptr, &ov_hdr_)              │
+│       （IOCP には ReadFile + OVERLAPPED を使用。ReadFileEx は APC   │
+│        alertable-wait 向けであり GQCS とは併用不可）                │
+│    ② dispatch_thread_ が GQCS でヘッダ完了を受信                   │
+│    ③ magic/version/payload_size 検証後、                           │
+│       ReadFile(hPipe_, payload_buf, N, nullptr, &ov_payload_)       │
+│    ④ dispatch_thread_ が GQCS で payload 完了を受信 → CRC-32C 検証 │
+│    ⑤ PyGILState_Ensure() → loop_.call_soon_threadsafe(cb, ...)     │
+│       → PyGILState_Release()                                        │
 │                                                                   │
 │  cancel():                                                         │
 │    CancelIoEx(hPipe_, nullptr) → dispatch_thread_ に ERROR_OPERATION_ABORTED が返る │
@@ -446,15 +453,30 @@ class NativeAsyncPipe:
         # connect は同期だが GIL 解放済みなので to_thread 不要
         await loop.run_in_executor(None, self._handle.connect, pipe_name, timeout_ms)
 
-    async def read_frame(self) -> Message:
-        """FrameHeader + payload を非同期受信。CancelledError 対応。"""
+    async def read_frame(self, timeout_ms: int = 0) -> Message:
+        """
+        FrameHeader + payload を非同期受信。CancelledError 対応。
+
+        Args:
+            timeout_ms: タイムアウト（ミリ秒）。0 は無制限待機。
+                        正の値を指定した場合は asyncio.wait_for でラップして
+                        asyncio.TimeoutError → pipeutil.TimeoutError に変換する。
+        """
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bytes] = loop.create_future()
 
         self._handle.async_read_frame(loop, future)
 
         try:
-            payload = await future
+            if timeout_ms > 0:
+                payload = await asyncio.wait_for(future, timeout=timeout_ms / 1000.0)
+            else:
+                payload = await future
+        except asyncio.TimeoutError:
+            self._handle.cancel()
+            # Phase 1 との挙動を統一するため pipeutil.TimeoutError に変換
+            from ._pipeutil import TimeoutError as PipeTimeoutError
+            raise PipeTimeoutError(f"read_frame timed out after {timeout_ms} ms") from None
         except asyncio.CancelledError:
             self._handle.cancel()
             raise
@@ -536,7 +558,8 @@ class AsyncPipeClient:
 
     async def receive(self, timeout_ms: int = 5000) -> Message:
         if _NATIVE_BACKEND:
-            return await self._native.read_frame()  # type: ignore[union-attr]
+            # R-047 対応: timeout_ms を native backend へ透過的に伝達する
+            return await self._native.read_frame(timeout_ms)  # type: ignore[union-attr]
         else:
             # Phase 1 fallback
             return await asyncio.to_thread(self._impl.receive, timeout_ms)  # type: ignore[union-attr]
@@ -572,7 +595,10 @@ option(PIPEUTIL_WITH_ASYNC
 )
 
 if(PIPEUTIL_WITH_ASYNC)
-    add_subdirectory(python_async)  # または python/CMakeLists.txt へ統合
+    # R-048 対応: python_async という別サブディレクトリは作成しない。
+    # 既存の source/python/CMakeLists.txt 内に _pipeutil_async ターゲットを
+    # 追加する形で統合する（§7.2 参照）。
+    # add_subdirectory(python) は既に追加済みのため変更不要。
 endif()
 ```
 
