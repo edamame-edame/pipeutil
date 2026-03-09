@@ -50,8 +50,17 @@ cmake.minimum-version = "3.25"
 # ─── オプション依存 ──────────────────────────────────────────────────
 
 [project.optional-dependencies]
-test  = ["pytest>=8.0", "pytest-timeout>=2.3"]
-async = ["pytest-asyncio>=0.23"]
+test    = ["pytest>=8.0", "pytest-timeout>=2.3"]
+async   = ["pytest-asyncio>=0.23"]
+msgpack = ["msgpack>=1.0"]              # 追加: opt-in msgpack サポート
+
+# 開発フルセット（全 optional extra 込み）
+dev     = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
+    "pytest-asyncio>=0.23",
+    "msgpack>=1.0",
+]
 
 # ─── 開発ツール設定 ───────────────────────────────────────────────────
 

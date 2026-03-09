@@ -277,6 +277,26 @@ class InvalidMessageError(PipeError):
     """フレームのマジック / バージョン / CRC が不正。"""
     ...
 
+# ─── Codec ────────────────────────────────────────────────────────────
+# CodecError は PipeError 定義後に配置する（R-036 対応）
+
+class CodecError(PipeError):
+    """エンコード / デコード処理の失敗。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        codec: str,
+        original: BaseException | None = ...,
+    ) -> None: ...
+
+    @property
+    def codec(self) -> str: ...
+
+    @property
+    def original(self) -> BaseException | None: ...
+
 # ─── パッケージ定数 ───────────────────────────────────────────────────
 
 __version__: str
@@ -305,3 +325,37 @@ from .mp import (
     ProcessPipeServer as ProcessPipeServer,
     spawn_worker_factory as spawn_worker_factory,
 )
+
+# ─── コーデックユーティリティ [C]（pipeutil.message_utils から re-export）─────
+# CodecError は上の例外階層セクションで定義済み（R-036 対応）
+
+from typing import Any
+
+def encode_json(
+    data: Any,
+    *,
+    encoding: str = ...,
+    ensure_ascii: bool = ...,
+    **json_kwargs: Any,
+) -> Message: ...
+
+def decode_json(
+    msg: Message,
+    *,
+    encoding: str = ...,
+    **json_kwargs: Any,
+) -> Any: ...
+
+def encode_msgpack(
+    data: Any,
+    *,
+    use_bin_type: bool = ...,
+    **pack_kwargs: Any,
+) -> Message: ...
+
+def decode_msgpack(
+    msg: Message,
+    *,
+    raw: bool = ...,
+    **unpack_kwargs: Any,
+) -> Any: ...

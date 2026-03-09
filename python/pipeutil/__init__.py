@@ -39,6 +39,15 @@ from .mp import (              # noqa: F401
     spawn_worker_factory,
 )
 
+# [C] コーデックユーティリティ（JSON / msgpack）
+from .message_utils import (   # noqa: F401
+    encode_json,
+    decode_json,
+    encode_msgpack,
+    decode_msgpack,
+    CodecError,
+)
+
 __all__ = [
     # ─── コア（C 拡張） ───────────────────────────────────────────────
     "Message",
@@ -66,6 +75,12 @@ __all__ = [
     "WorkerPipeClient",
     "ProcessPipeServer",
     "spawn_worker_factory",
+    # ─── コーデック [C] ──────────────────────────────────────────────
+    "encode_json",
+    "decode_json",
+    "encode_msgpack",
+    "decode_msgpack",
+    "CodecError",
 ]
 
-__version__: str = "0.4.0"
+__version__: str = "0.5.0"
