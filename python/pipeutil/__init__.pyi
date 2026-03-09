@@ -280,3 +280,28 @@ class InvalidMessageError(PipeError):
 # ─── パッケージ定数 ───────────────────────────────────────────────────
 
 __version__: str
+
+# ─── asyncio ラッパー [A]（pipeutil.aio から re-export） ──────────────
+
+from .aio import (
+    AsyncPipeClient as AsyncPipeClient,
+    AsyncPipeServer as AsyncPipeServer,
+    AsyncRpcPipeClient as AsyncRpcPipeClient,
+    AsyncRpcPipeServer as AsyncRpcPipeServer,
+    serve_connections as serve_connections,
+)
+
+# ─── threading ラッパー [T]（pipeutil.threading_utils から re-export）─
+
+from .threading_utils import (
+    ThreadedPipeClient as ThreadedPipeClient,
+    ThreadedPipeServer as ThreadedPipeServer,
+)
+
+# ─── multiprocessing ラッパー [M]（pipeutil.mp から re-export）────────
+
+from .mp import (
+    WorkerPipeClient as WorkerPipeClient,
+    ProcessPipeServer as ProcessPipeServer,
+    spawn_worker_factory as spawn_worker_factory,
+)

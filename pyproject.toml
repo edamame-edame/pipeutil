@@ -50,7 +50,8 @@ cmake.minimum-version = "3.25"
 # ─── オプション依存 ──────────────────────────────────────────────────
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-timeout>=2.3"]
+test  = ["pytest>=8.0", "pytest-timeout>=2.3"]
+async = ["pytest-asyncio>=0.23"]
 
 # ─── 開発ツール設定 ───────────────────────────────────────────────────
 
@@ -58,6 +59,8 @@ test = ["pytest>=8.0", "pytest-timeout>=2.3"]
 testpaths  = ["tests/python"]
 timeout    = 30          # テストごとの上限 (秒)
 addopts    = "-v --tb=short"
+asyncio_mode      = "strict"   # @pytest.mark.asyncio を明示使用（sync テストへの干渉を防ぐ）
+asyncio_default_fixture_loop_scope = "function"  # deprecated behavior 解消
 
 [tool.mypy]
 python_version = "3.8"

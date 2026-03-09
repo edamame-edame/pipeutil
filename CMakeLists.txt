@@ -19,9 +19,20 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 option(PIPEUTIL_BUILD_PYTHON   "Build Python C API extension (_pipeutil)"   ON)
 option(PIPEUTIL_BUILD_TESTS    "Build unit tests (requires GTest)"          OFF)
 option(PIPEUTIL_BUILD_EXAMPLES "Build usage examples"                       OFF)
+# デバッグログ: cmake -DPIPEUTIL_DEBUG_LOG=ON で有効化。リリースでは OFF を維持すること。
+option(PIPEUTIL_DEBUG_LOG      "Enable verbose stderr debug logging in C extension" OFF)
 
 # ─── サブディレクトリ ─────────────────────────────────────────────────
 add_subdirectory(source)
+
+# デバッグログ定義の伝搬: pipeutil_core と _pipeutil に同時に適用する
+if(PIPEUTIL_DEBUG_LOG)
+    message(STATUS "PIPEUTIL_DEBUG_LOG: enabled (verbose stderr logging)")
+    target_compile_definitions(pipeutil_core PRIVATE PIPEUTIL_DEBUG_LOG)
+    if(PIPEUTIL_BUILD_PYTHON AND TARGET _pipeutil)
+        target_compile_definitions(_pipeutil PRIVATE PIPEUTIL_DEBUG_LOG)
+    endif()
+endif()
 
 if(PIPEUTIL_BUILD_EXAMPLES)
     add_subdirectory(examples)

@@ -10,6 +10,24 @@
 #endif
 #include <windows.h>
 
+// デバッグログ: ビルド時に -DPIPEUTIL_DEBUG_LOG を渡すと有効。リリースでは何も生成しない。
+#ifdef PIPEUTIL_DEBUG_LOG
+#  include <cstdio>
+// NOLINTBEGIN(cppcoreguidelines-pro-type-vararg)
+#  define PIPELOG(fmt, ...)                                                  \
+     do {                                                                    \
+         fprintf(stderr,                                                     \
+                 "[PIPELOG (win32) TID=%lu] %s:%d " fmt "\n",               \
+                 (unsigned long)GetCurrentThreadId(),                        \
+                 __FILE__, __LINE__,                                         \
+                 ##__VA_ARGS__);                                             \
+         fflush(stderr);                                                     \
+     } while (0)
+// NOLINTEND(cppcoreguidelines-pro-type-vararg)
+#else
+#  define PIPELOG(fmt, ...) do {} while (0)
+#endif
+
 #include "platform/win32_pipe.hpp"
 #include "pipeutil/pipe_error.hpp"
 
@@ -118,6 +136,7 @@ void Win32Pipe::server_accept(int64_t timeout_ms) {
         throw pipeutil::PipeException{pipeutil::PipeErrorCode::NotConnected,
                                       "server_create() must be called before server_accept()"};
     }
+    PIPELOG("server_accept: start timeout_ms=%lld", (long long)timeout_ms);
 
     OVERLAPPED ov = {};
     ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -252,17 +271,18 @@ std::unique_ptr<IPlatformPipe> Win32Pipe::server_accept_and_fork(int64_t timeout
 }
 
 void Win32Pipe::server_close() noexcept {
+    PIPELOG("server_close: start hPipe_=%p connected_=%d", (void*)hPipe_, (int)connected_);
     if (hPipe_ != INVALID_HANDLE_VALUE) {
         if (connected_) {
             // クライアントが未読データを読み切るまで待機してから切断する (R-F001-1)。
             // FlushFileBuffers はデータが全てクライアントに渡るまでブロックする。
-            // DisconnectNamedPipe は呼ばない: accepted (forked) 接続では不要であり、
-            // 呼ぶとクライアントの pending ReadFile が ERROR_PIPE_NOT_CONNECTED で失敗する。
-            // CloseHandle 単独でカーネルが書き込みバッファをフラッシュして接続を閉じる。
+            PIPELOG("server_close: FlushFileBuffers start (may block until client reads)");
             FlushFileBuffers(hPipe_);
+            PIPELOG("server_close: FlushFileBuffers done");
         }
         // CloseHandle により pending な ConnectNamedPipe I/O が自動キャンセルされ
         // accept_ov_ に完了通知が書き込まれる（メンバー変数なので安全）。
+        PIPELOG("server_close: CloseHandle");
         CloseHandle(hPipe_);
         hPipe_ = INVALID_HANDLE_VALUE;
     }
@@ -279,6 +299,7 @@ void Win32Pipe::server_close() noexcept {
     pipe_name_wstr_.clear();
     listening_  = false;
     connected_  = false;
+    PIPELOG("server_close: done");
 }
 
 // ─── クライアント操作 ─────────────────────────────────────────────
@@ -292,6 +313,7 @@ void Win32Pipe::client_connect(const std::string& pipe_name, int64_t timeout_ms)
     const std::wstring path = to_pipe_path(pipe_name);
     const auto deadline = std::chrono::steady_clock::now()
                         + std::chrono::milliseconds{timeout_ms};
+    PIPELOG("client_connect: start name='%s' timeout_ms=%lld", pipe_name.c_str(), (long long)timeout_ms);
 
     while (true) {
         hPipe_ = CreateFileW(
@@ -321,15 +343,18 @@ void Win32Pipe::client_connect(const std::string& pipe_name, int64_t timeout_ms)
         WaitNamedPipeW(path.c_str(), 10);
     }
 
+    PIPELOG("client_connect: CreateFileW succeeded");
     connected_ = true;
 }
 
 void Win32Pipe::client_close() noexcept {
+    PIPELOG("client_close: start hPipe_=%p connected_=%d", (void*)hPipe_, (int)connected_);
     if (hPipe_ != INVALID_HANDLE_VALUE) {
         CloseHandle(hPipe_);
         hPipe_ = INVALID_HANDLE_VALUE;
     }
     connected_ = false;
+    PIPELOG("client_close: done");
 }
 
 // ─── 共通 I/O ─────────────────────────────────────────────────────
@@ -348,6 +373,7 @@ void Win32Pipe::read_all(std::byte* buf, std::size_t size, int64_t timeout_ms) {
 void Win32Pipe::overlapped_write_all(const std::byte* data, std::size_t size) {
     const std::byte* ptr = data;
     std::size_t remaining = size;
+    PIPELOG("overlapped_write_all: start size=%zu", size);
 
     while (remaining > 0) {
         OVERLAPPED ov = {};
@@ -367,7 +393,9 @@ void Win32Pipe::overlapped_write_all(const std::byte* data, std::size_t size) {
                 throw pipeutil::PipeException{map_win32_error(err), "WriteFile failed"};
             }
             // OVERLAPPED 完了を待つ
+            PIPELOG("overlapped_write_all: WaitForSingleObject(INFINITE) remaining=%zu", remaining);
             const DWORD result = WaitForSingleObject(ov.hEvent, INFINITE);
+            PIPELOG("overlapped_write_all: WaitForSingleObject returned 0x%lx", (unsigned long)result);
             if (result != WAIT_OBJECT_0) {
                 CloseHandle(ov.hEvent);
                 throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
@@ -386,12 +414,15 @@ void Win32Pipe::overlapped_write_all(const std::byte* data, std::size_t size) {
 
         ptr       += written;
         remaining -= written;
+        PIPELOG("overlapped_write_all: wrote %lu bytes remaining=%zu", (unsigned long)written, remaining);
     }
+    PIPELOG("overlapped_write_all: done total=%zu", size);
 }
 
 void Win32Pipe::overlapped_read_all(std::byte* buf, std::size_t size, DWORD dw_timeout) {
     std::byte* ptr = buf;
     std::size_t remaining = size;
+    PIPELOG("overlapped_read_all: start size=%zu dw_timeout=%lu", size, (unsigned long)dw_timeout);
 
     // INFINITE 以外はデッドラインを計算して全チャンク合計に上限を設ける (R-015)
     const bool infinite_timeout = (dw_timeout == INFINITE);
@@ -438,7 +469,10 @@ void Win32Pipe::overlapped_read_all(std::byte* buf, std::size_t size, DWORD dw_t
                 throw pipeutil::PipeException{map_win32_error(err), "ReadFile failed"};
             }
 
+            PIPELOG("overlapped_read_all: WaitForSingleObject chunk_timeout=%lu remaining=%zu",
+                    (unsigned long)chunk_timeout, remaining);
             const DWORD result = WaitForSingleObject(ov.hEvent, chunk_timeout);
+            PIPELOG("overlapped_read_all: WaitForSingleObject returned 0x%lx", (unsigned long)result);
             if (result == WAIT_TIMEOUT) {
                 CancelIo(hPipe_);
                 CloseHandle(ov.hEvent);
@@ -472,7 +506,10 @@ void Win32Pipe::overlapped_read_all(std::byte* buf, std::size_t size, DWORD dw_t
 
         ptr       += read_bytes;
         remaining -= read_bytes;
+        PIPELOG("overlapped_read_all: read %lu bytes remaining=%zu",
+                (unsigned long)read_bytes, remaining);
     }
+    PIPELOG("overlapped_read_all: done total=%zu", size);
 }
 
 // ─── 状態照会 ─────────────────────────────────────────────────────

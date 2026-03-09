@@ -5,6 +5,7 @@
 #include "py_pipe_server.hpp"
 #include "py_exceptions.hpp"
 #include "py_message.hpp"
+#include "py_debug_log.hpp"
 #include <chrono>
 
 namespace pyutil {
@@ -96,6 +97,7 @@ static PyObject* PyPipeServer_accept(PyPipeServer* self, PyObject* args, PyObjec
     auto timeout_ms = to_ms(timeout_sec);
     pipeutil::PipeException* pending = nullptr;
 
+    PIPELOG("accept: BEGIN_ALLOW_THREADS timeout_ms=%lld", (long long)timeout_ms.count());
     Py_BEGIN_ALLOW_THREADS
     try {
         self->server->accept(timeout_ms);
@@ -103,6 +105,7 @@ static PyObject* PyPipeServer_accept(PyPipeServer* self, PyObject* args, PyObjec
         pending = new pipeutil::PipeException{e};
     }
     Py_END_ALLOW_THREADS
+    PIPELOG("accept: END_ALLOW_THREADS pending=%s", pending ? "yes" : "no");
 
     if (pending) {
         set_python_exception(*pending);
@@ -122,6 +125,7 @@ static PyObject* PyPipeServer_send(PyPipeServer* self, PyObject* args) {
 
     pipeutil::PipeException* pending = nullptr;
 
+    PIPELOG("send: BEGIN_ALLOW_THREADS size=%zu", msg.payload().size());
     Py_BEGIN_ALLOW_THREADS
     try {
         self->server->send(msg);
@@ -129,6 +133,7 @@ static PyObject* PyPipeServer_send(PyPipeServer* self, PyObject* args) {
         pending = new pipeutil::PipeException{e};
     }
     Py_END_ALLOW_THREADS
+    PIPELOG("send: END_ALLOW_THREADS pending=%s", pending ? "yes" : "no");
 
     if (pending) {
         set_python_exception(*pending);
@@ -151,6 +156,7 @@ static PyObject* PyPipeServer_receive(PyPipeServer* self, PyObject* args, PyObje
     pipeutil::Message result{};
     pipeutil::PipeException* pending = nullptr;
 
+    PIPELOG("receive: BEGIN_ALLOW_THREADS timeout_ms=%lld", (long long)timeout_ms.count());
     Py_BEGIN_ALLOW_THREADS
     try {
         result = self->server->receive(timeout_ms);
@@ -158,6 +164,8 @@ static PyObject* PyPipeServer_receive(PyPipeServer* self, PyObject* args, PyObje
         pending = new pipeutil::PipeException{e};
     }
     Py_END_ALLOW_THREADS
+    PIPELOG("receive: END_ALLOW_THREADS pending=%s size=%zu",
+            pending ? "yes" : "no", pending ? 0 : result.payload().size());
 
     if (pending) {
         set_python_exception(*pending);
@@ -169,7 +177,13 @@ static PyObject* PyPipeServer_receive(PyPipeServer* self, PyObject* args, PyObje
 
 static PyObject* PyPipeServer_close(PyPipeServer* self, PyObject* /*args*/) {
     if (self->server) {
+        // close() は内部で FlushFileBuffers (ブロッキング I/O) を呼ぶ可能性があるため
+        // GIL を解放してデッドロックを回避する (R-GIL-001)。
+        PIPELOG("close: BEGIN_ALLOW_THREADS");
+        Py_BEGIN_ALLOW_THREADS
         self->server->close();
+        Py_END_ALLOW_THREADS
+        PIPELOG("close: END_ALLOW_THREADS");
     }
     Py_RETURN_NONE;
 }
