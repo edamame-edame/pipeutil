@@ -1,14 +1,14 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-10 08:00:00
+最終更新: 2026-03-10 08:30:00
 最新レビューCSV: review/20260310080000.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 1（R-049）
-- 今回再レビューでの新規指摘（Medium 以上）: 1 件（R-049）、Low 1 件（R-050）
-- 修正確認済み指摘数: 47（R-045〜R-048 の修正を確認し集約）
-- 今回対象: F-004 Phase 2 仕様書レビュー（第3回、R-045〜R-048 修正確認 + 新規チェック）
+- 未修正指摘数（Medium 以上）: 0（R-049 対応済み、レビュアの確認待ち）
+- 今回対応した指摘: R-049（Medium）・R-050（Low） — 仕様書対応完了、レビュア確認待ち
+- 修正確認済み指摘数: 47（R-049・R-050 はレビュア確認待ちのため未集約）
+- 今回対象: F-004 Phase 2 仕様書 R-049・R-050 修正対応
 
 ---
 
@@ -70,13 +70,13 @@
 **指摘**: `asyncio.wait_for` タイムアウト発火後に IOCP I/O が正常完了した場合、dispatch thread が `call_soon_threadsafe(future.set_result, data)` を投入するが、future は既に `wait_for` により cancel されているため asyncio スレッド上で `asyncio.InvalidStateError` が発生する。この race condition への対処（`set_result` 前に `not future.done()` チェック、または `InvalidStateError` の `PyErr_Clear` 処理）が §3.3 / §5.2 に未記載。
 **影響**: asyncio のエラーハンドラへ未補足例外が流れ込み、本番環境でのデバッグが困難になる。
 **根拠**: CPython `asyncio.Future.set_result()` は done 状態の Future に呼ぶと `InvalidStateError` を送出する（Lib/asyncio/futures.py）。
-**対応状況**: 未対応
+→ spec/F004p2_async_native.md §3.3 注意事項に「タイムアウト/キャンセル競合対策（R-049 対応）」項目を追加。`if not future.done():` ガードを伴う `call_soon_threadsafe` コールバックの C++ コード例も追記。✅
 
 ### R-050（Low / Spec-Quality / F-004p2）
 **指摘**: §6.1 本文に「native backend を使使用する」という誤字（文字重複）がある。
 **影響**: 読みやすさの低下のみ。機能への影響なし。
 **根拠**: typo
-**対応状況**: 未対応
+→ spec/F004p2_async_native.md §6.1 の「使使用」を「使用」に修正。✅
 
 ---
 

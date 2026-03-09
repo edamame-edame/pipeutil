@@ -261,6 +261,30 @@ private:
   コールバック完了後（またはキャンセル時）に dispatch_thread_ ではなく asyncio スレッド上で `Py_DECREF` すること（R-039 対応）
 - `call_soon_threadsafe` が `RuntimeError`（ループクローズ）を送出した場合は `PyErr_Clear()` でエラーをクリアし、
   `PIPELOG` でデバッグログを出力して無視する（R-043 対応）
+- **タイムアウト/キャンセル競合対策（R-049 対応）**: dispatch_thread_ が `call_soon_threadsafe` で
+  `future.set_result(data)` / `future.set_exception(exc)` を asyncio スレッドへ投入する際、
+  asyncio スレッド上のコールバック内で **必ず `if not future.done():` を確認してから呼ぶこと**。
+  `asyncio.wait_for` タイムアウト後に Python 側が future を cancel済みにしている間に
+  IOCP I/O が正常完了した場合に `asyncio.InvalidStateError` が発生するのを防ぐ。
+
+  ```cpp
+  // dispatch_thread_ から投入するコールバックの例
+  auto cb = [fut = future_obj, data = std::move(payload)]() {
+      PyGILState_STATE gstate = PyGILState_Ensure();
+      // done() チェックで set_result の二重呼び出しと InvalidStateError を回避
+      PyObject* done = PyObject_CallMethodNoArgs(fut, PyUnicode_FromString("done"));
+      if (done == Py_False) {
+          PyObject* result = PyBytes_FromStringAndSize(
+              reinterpret_cast<const char*>(data.data()), data.size());
+          PyObject_CallMethodOneArg(fut, PyUnicode_FromString("set_result"), result);
+          Py_DECREF(result);
+      }
+      Py_XDECREF(done);
+      Py_DECREF(fut);  // Py_INCREF 対称のデクリメント（R-039）
+      PyGILState_Release(gstate);
+  };
+  loop_obj.call_soon_threadsafe(std::move(cb));
+  ```
 
 ### 3.4 Linux epoll モデル
 
@@ -519,7 +543,7 @@ class NativeAsyncPipe:
 
 ### 6.1 バックエンド検出
 
-`aio.py` の先頭で `_pipeutil_async` の import を試み、成功した場合に限り native backend を使使用する。
+`aio.py` の先頭で `_pipeutil_async` の import を試み、成功した場合に限り native backend を使用する。
 `_pipeutil_async` が存在しない場合は Phase 1 の `to_thread` ベースにフォールバックする。
 
 ```python
