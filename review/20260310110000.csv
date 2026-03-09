@@ -1,0 +1,2 @@
+id,severity,category,file,line,issue,impact,basis,status
+R-051,Medium,Python-CAPI,spec/F004p2_async_native.md,§3.3,"R-051 指摘（`PyUnicode_FromString` 一時オブジェクトの DECREF 不足、および `PyObject_CallMethodOneArg` 戻り値未処理）について、サンプルコードが修正済みであることを確認。","参照リークおよび戻り値未処理による例外検知漏れリスクを解消。","修正後仕様（§3.3）で `meth_done`/`meth_set` の `Py_XDECREF`、`ret` の NULL チェック + `Py_XDECREF` を確認。",Resolved

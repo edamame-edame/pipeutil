@@ -1,14 +1,14 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-10 10:35:00
-最新レビューCSV: review/20260310102000.csv
+最終更新: 2026-03-10 11:00:00
+最新レビューCSV: review/20260310110000.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 0（R-051 修正済み）
-- 今回再レビューでの新規指摘（Medium 以上）: 1 件（R-051）
-- 修正確認済み指摘数: 49（R-049・R-050 を確認し集約）
-- 今回対象: F-004 Phase 2 仕様書レビュー（第4回、R-049・R-050 修正確認 + 新規チェック）
+- 未修正指摘数（Medium 以上）: 0
+- 今回再レビューでの新規指摘（Medium 以上）: 0 件
+- 修正確認済み指摘数: 50（R-051 を確認し集約）
+- 今回対象: F-004 Phase 2 仕様書レビュー（第5回、R-051 修正確認 + 新規チェック）
 
 ---
 
@@ -63,17 +63,13 @@
 - R-048（Spec-Consistency / F-004p2）: `_pipeutil_async` は既存 `source/python/CMakeLists.txt` に統合し、`python_async` という独立サブディレクトリは作成しないこと。
 - R-049（API-Contract / F-004p2）: `asyncio.wait_for` タイムアウトと IOCP 完了競合時は asyncio スレッド側で `if not future.done():` ガードを必ず入れること。
 - R-050（Spec-Quality / F-004p2）: 仕様書本文の誤字（例:「使使用」）は実装前レビューで除去すること。
+- R-051（Python-CAPI / F-004p2）: C-API サンプルでは `PyUnicode_FromString` 等の New reference を確実に解放し、Call 系 API の戻り値を必ず検査・解放すること。
 
 ---
 
 ## 3. 未修正指摘（Medium 以上）
 
-### R-051（Medium / Python-CAPI / F-004p2）
-**指摘**: R-049 対応で追記された C++ サンプルが `PyUnicode_FromString("done")` / `PyUnicode_FromString("set_result")` の一時オブジェクトを都度生成しており DECREF されない。加えて `PyObject_CallMethodOneArg` の戻り値も未処理。サンプルどおり実装すると参照リーク/例外握りつぶしが発生しうる。
-**影響**: 長時間稼働時のメモリ増加、および Python 例外検知漏れによりデバッグ困難化。
-**根拠**: CPython C-API の参照カウント規約（New reference は DECREF が必要）、および Call 系 API の戻り値・エラーチェック規約。
-**対応状況**: 対応済み
-→ `spec/F004p2_async_native.md` §3.3 の C++ サンプルで `meth_done`/`meth_set` を別変数に分離して `Py_XDECREF`、`PyObject_CallMethodOneArg` 戻り値を `ret` に受けて `if (!ret) PyErr_Clear()` + `Py_XDECREF(ret)` を追加。✅
+なし
 
 ---
 
