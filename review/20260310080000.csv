@@ -1,0 +1,4 @@
+﻿id,severity,category,file,line,issue,impact,basis,status
+R-049,Medium,API-Contract,spec/F004p2_async_native.md,"§3.3/§5.2","syncio.wait_for タイムアウト発火後に IOCP I/O が正常完了した場合、dispatch thread が call_soon_threadsafe(future.set_result, data) を投入するが、future はすでに wait_for に cancel されているため asyncio スレッド上で syncio.InvalidStateError が発生する。この race condition への対処（set_result 前に 
+ot future.done() チェック、または InvalidStateError の PyErr_Clear 処理）が仕様書未記載。","asyncio のエラーハンドラに未補足例外が流れ込み、本番環境でのデバッグが困難になる。","asyncio.Future.set_result() は done 状態の Future に呼ぶと InvalidStateError を送出する（CPython ソース Lib/asyncio/futures.py）。",Open
+R-050,Low,Spec-Quality,spec/F004p2_async_native.md,§6.1,"「native backend を使使用する」と誤字（文字重複）。","読みやすさの低下のみ。機能への影響なし。","typo",Open
