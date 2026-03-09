@@ -1,14 +1,14 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-10 08:30:00
-最新レビューCSV: review/20260310080000.csv
+最終更新: 2026-03-10 10:35:00
+最新レビューCSV: review/20260310102000.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 0（R-049 対応済み、レビュアの確認待ち）
-- 今回対応した指摘: R-049（Medium）・R-050（Low） — 仕様書対応完了、レビュア確認待ち
-- 修正確認済み指摘数: 47（R-049・R-050 はレビュア確認待ちのため未集約）
-- 今回対象: F-004 Phase 2 仕様書 R-049・R-050 修正対応
+- 未修正指摘数（Medium 以上）: 0（R-051 修正済み）
+- 今回再レビューでの新規指摘（Medium 以上）: 1 件（R-051）
+- 修正確認済み指摘数: 49（R-049・R-050 を確認し集約）
+- 今回対象: F-004 Phase 2 仕様書レビュー（第4回、R-049・R-050 修正確認 + 新規チェック）
 
 ---
 
@@ -61,22 +61,19 @@
 - R-046（Python-CAPI / F-004p2）: 外部 C++ スレッドから Python C API を呼ぶ際は `PyGILState_Ensure/Release` を使うこと。`Py_BEGIN/END_ALLOW_THREADS` は GIL 保持スレッド用であり dispatch thread での使用禁止。
 - R-047（Timeout-Contract / F-004p2）: `receive(timeout_ms)` の timeout は native 側 `read_frame(timeout_ms)` へ透過渡しすること。Phase 1/2 でタイムアウト挙動を統一すること。
 - R-048（Spec-Consistency / F-004p2）: `_pipeutil_async` は既存 `source/python/CMakeLists.txt` に統合し、`python_async` という独立サブディレクトリは作成しないこと。
+- R-049（API-Contract / F-004p2）: `asyncio.wait_for` タイムアウトと IOCP 完了競合時は asyncio スレッド側で `if not future.done():` ガードを必ず入れること。
+- R-050（Spec-Quality / F-004p2）: 仕様書本文の誤字（例:「使使用」）は実装前レビューで除去すること。
 
 ---
 
 ## 3. 未修正指摘（Medium 以上）
 
-### R-049（Medium / API-Contract / F-004p2）
-**指摘**: `asyncio.wait_for` タイムアウト発火後に IOCP I/O が正常完了した場合、dispatch thread が `call_soon_threadsafe(future.set_result, data)` を投入するが、future は既に `wait_for` により cancel されているため asyncio スレッド上で `asyncio.InvalidStateError` が発生する。この race condition への対処（`set_result` 前に `not future.done()` チェック、または `InvalidStateError` の `PyErr_Clear` 処理）が §3.3 / §5.2 に未記載。
-**影響**: asyncio のエラーハンドラへ未補足例外が流れ込み、本番環境でのデバッグが困難になる。
-**根拠**: CPython `asyncio.Future.set_result()` は done 状態の Future に呼ぶと `InvalidStateError` を送出する（Lib/asyncio/futures.py）。
-→ spec/F004p2_async_native.md §3.3 注意事項に「タイムアウト/キャンセル競合対策（R-049 対応）」項目を追加。`if not future.done():` ガードを伴う `call_soon_threadsafe` コールバックの C++ コード例も追記。✅
-
-### R-050（Low / Spec-Quality / F-004p2）
-**指摘**: §6.1 本文に「native backend を使使用する」という誤字（文字重複）がある。
-**影響**: 読みやすさの低下のみ。機能への影響なし。
-**根拠**: typo
-→ spec/F004p2_async_native.md §6.1 の「使使用」を「使用」に修正。✅
+### R-051（Medium / Python-CAPI / F-004p2）
+**指摘**: R-049 対応で追記された C++ サンプルが `PyUnicode_FromString("done")` / `PyUnicode_FromString("set_result")` の一時オブジェクトを都度生成しており DECREF されない。加えて `PyObject_CallMethodOneArg` の戻り値も未処理。サンプルどおり実装すると参照リーク/例外握りつぶしが発生しうる。
+**影響**: 長時間稼働時のメモリ増加、および Python 例外検知漏れによりデバッグ困難化。
+**根拠**: CPython C-API の参照カウント規約（New reference は DECREF が必要）、および Call 系 API の戻り値・エラーチェック規約。
+**対応状況**: 対応済み
+→ `spec/F004p2_async_native.md` §3.3 の C++ サンプルで `meth_done`/`meth_set` を別変数に分離して `Py_XDECREF`、`PyObject_CallMethodOneArg` 戻り値を `ret` に受けて `if (!ret) PyErr_Clear()` + `Py_XDECREF(ret)` を追加。✅
 
 ---
 

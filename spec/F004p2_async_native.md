@@ -272,11 +272,17 @@ private:
   auto cb = [fut = future_obj, data = std::move(payload)]() {
       PyGILState_STATE gstate = PyGILState_Ensure();
       // done() チェックで set_result の二重呼び出しと InvalidStateError を回避
-      PyObject* done = PyObject_CallMethodNoArgs(fut, PyUnicode_FromString("done"));
+      PyObject* meth_done   = PyUnicode_FromString("done");
+      PyObject* done        = PyObject_CallMethodNoArgs(fut, meth_done);
+      Py_XDECREF(meth_done);                    // 一時文字列オブジェクトを即解放（R-051）
       if (done == Py_False) {
-          PyObject* result = PyBytes_FromStringAndSize(
+          PyObject* result   = PyBytes_FromStringAndSize(
               reinterpret_cast<const char*>(data.data()), data.size());
-          PyObject_CallMethodOneArg(fut, PyUnicode_FromString("set_result"), result);
+          PyObject* meth_set = PyUnicode_FromString("set_result");
+          PyObject* ret      = PyObject_CallMethodOneArg(fut, meth_set, result);
+          Py_XDECREF(meth_set);                 // 一時文字列オブジェクトを即解放（R-051）
+          if (!ret) { PyErr_Clear(); }          // エラーを検知・クリア（R-051）
+          Py_XDECREF(ret);                      // 戻り値を解放（R-051）
           Py_DECREF(result);
       }
       Py_XDECREF(done);

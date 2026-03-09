@@ -1,0 +1,4 @@
+id,severity,category,file,line,issue,impact,basis,status
+R-049,Medium,API-Contract,spec/F004p2_async_native.md,§3.3/§5.2,"`asyncio.wait_for` タイムアウトと IOCP 正常完了の競合時に `future.done()` ガードが必要という指摘について、§3.3 に対策方針とコード例が追加されていることを確認。","タイムアウト競合時の `asyncio.InvalidStateError` 混入リスクを設計上で抑止できる。","修正後仕様（§3.3）で `if not future.done():` を明記。",Resolved
+R-050,Low,Spec-Quality,spec/F004p2_async_native.md,§6.1,"誤字「使使用」が「使用」に修正されていることを確認。","可読性低下要因を除去。","修正後仕様（§6.1）を確認。",Resolved
+R-051,Medium,Python-CAPI,spec/F004p2_async_native.md,§3.3,"R-049 対応で追記された C++ サンプルが `PyUnicode_FromString("done")` / `PyUnicode_FromString("set_result")` の一時オブジェクトを都度生成しており DECREF されない。加えて `PyObject_CallMethodOneArg` の戻り値も未処理。サンプルどおり実装すると参照リーク/例外握りつぶしが発生しうる。","長時間稼働時のメモリ増加、および Python 例外検知漏れによりデバッグ困難化。","CPython C-API の参照カウント規約（New reference は DECREF が必要）、および Call 系 API の戻り値・エラーチェック規約。",Open
