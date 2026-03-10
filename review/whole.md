@@ -1,14 +1,14 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-10 22:38:00
-最新レビューCSV: review/20260310223800.csv
+最終更新: 2026-03-11 07:00:42
+最新レビューCSV: review/20260311070042.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 0
-- 今回再レビューでの新規指摘（Medium 以上）: 0 件
+- 未修正指摘数（Medium 以上）: 2
+- 今回再レビューでの新規指摘（Medium 以上）: 2 件
 - 修正確認済み指摘数: 59（R-060 まで集約済み）
-- 今回対象: F-003 詳細設計 最終確認レビュー（`spec/F003_reconnecting_pipe_client.md`）
+- 今回対象: F-006 詳細設計レビュー（`spec/F006_diagnostics_metrics.md`）
 
 ---
 
@@ -78,7 +78,17 @@
 
 ## 3. 未修正指摘（Medium 以上）
 
-- なし
+- R-061 (High, Metrics-Contract)
+	**指摘**: `MultiPipeServer::stats()` の擬似コードが `active_connections_` のみを合算しており、接続終了済みセッションの統計が失われる設計になっている。さらに現行実装には `active_connections_` コンテナ自体が存在せず、仕様どおり実装できない。
+	**影響**: 長時間稼働時に `messages_sent/bytes_sent` が接続終了のたびに見えなくなり、監視値が実トラフィックを過小表示する。実装時に仕様と既存構造が衝突し、設計再作業が発生する。
+	**根拠**: `spec/F006_diagnostics_metrics.md:33` は `全接続合算` を必須化している一方、`spec/F006_diagnostics_metrics.md:327-335` は `active_connections_` のみを走査。現行 `source/core/src/multi_pipe_server.cpp:109,133,158` は `active_count_` と detach 運用で、接続オブジェクトを保持する `active_connections_` は存在しない。
+	**対応状況**: Open
+
+- R-062 (Medium, Spec-Consistency)
+	**指摘**: `errors` カウント方針が本文内で矛盾している。実装例では `catch (...)` で全例外をカウントしているが、制約章では `PipeException` のみカウントすると定義している。
+	**影響**: 実装者によって `std::bad_alloc` など非 `PipeException` を含める/含めない挙動が分岐し、メトリクス互換性が崩れる。
+	**根拠**: `spec/F006_diagnostics_metrics.md:246,306` のコード例は `catch (...)` で `stat_errors_` を加算。`spec/F006_diagnostics_metrics.md:740-742` は `PipeException` のみカウントと明記。
+	**対応状況**: Open
 
 ---
 
@@ -89,3 +99,4 @@
 - **Protocol-Format**: フレーム定義変更時は図・表・構造体・`static_assert` を同時に更新すること
 - **Python-CAPI**: 新規 C 拡張関数追加時は所有権フローを必ずレビューに含めること
 - **Windows-IPC**: Win32 API の境界ケース（`ERROR_*` の一覧）は実装前に完全列挙すること
+- **Metrics-Contract**: 累積メトリクスは「現時点のアクティブ接続」ではなく「プロセス開始以降の累積値」を基本契約にし、接続終了で値が消えない設計を維持すること
