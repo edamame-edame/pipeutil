@@ -250,10 +250,18 @@ PyAsyncPipeHandle_async_write_frame(
 static PyObject*
 PyAsyncPipeHandle_cancel(PyAsyncPipeHandle* self, PyObject* /*args*/) {
     if (self->pipe) {
-        // CancelIoEx はカーネル呼び出しのため GIL を解放して呼ぶ
+#ifdef _WIN32
+        // (R-056) Windows: cancel() は CancelIoEx() のみを呼ぶ（Python C-API 不使用）。
+        // カーネル呼び出しのため GIL を解放して実行する。
         Py_BEGIN_ALLOW_THREADS
         self->pipe->cancel();
         Py_END_ALLOW_THREADS
+#else
+        // (R-056) Linux: cancel() は PyCapsule_GetPointer / PyObject_CallMethodObjArgs /
+        // Py_CLEAR 等の Python C-API を呼ぶため GIL を保持したまま実行する。
+        // GIL を解放すると未定義動作（クラッシュ / メモリ破壊）になる。
+        self->pipe->cancel();
+#endif
     }
     Py_RETURN_NONE;
 }
