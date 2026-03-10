@@ -88,8 +88,11 @@ tests/python/
    平均は `stats()` 取得時に計算する。
 5. **バイト数**: ペイロードのバイト数のみカウントする（フレームヘッダ 20 バイトは含まない）。
    ユーザーが意識するデータ量と一致させるため。
-6. **MultiPipeServer の合算**: 各接続スレッドが持つローカルカウンタを
-   `stats()` 呼び出し時に合算して返す（ロックを持たない接続ごとの atomic を合算するだけ）。
+6. **MultiPipeServer の合算**: 現行実装は接続スレッドを `detach()` する運用のため、
+   接続オブジェクトのポインタリストを保持しない。
+   セッション終了時（`SlotGuard` デストラクタ内）に `accumulated_stats_`（mutex 保護）へ
+   そのセッションの統計を加算する。`stats()` はこの累積バッファを返す。
+   アクティブセッションの統計はセッション終了後に反映される。
 
 ---
 
@@ -243,7 +246,8 @@ void send(const Message& msg) {
         // 成功時のみカウント
         stat_msgs_sent_.fetch_add(1, std::memory_order_relaxed);
         stat_bytes_sent_.fetch_add(msg.size(), std::memory_order_relaxed);
-    } catch (...) {
+    } catch (const PipeException&) {
+        // PipeException のみカウント（std::bad_alloc 等は対象外）
         stat_errors_.fetch_add(1, std::memory_order_relaxed);
         throw;
     }
@@ -303,7 +307,8 @@ Message send_request(const Message& req, std::chrono::milliseconds timeout) {
         stat_rtt_last_ns_.store(rtt_ns, std::memory_order_relaxed);
 
         return response;
-    } catch (...) {
+    } catch (const PipeException&) {
+        // PipeException のみカウント（std::bad_alloc 等は対象外）
         stat_errors_.fetch_add(1, std::memory_order_relaxed);
         throw;
     }
@@ -318,25 +323,52 @@ Message send_request(const Message& req, std::chrono::milliseconds timeout) {
 
 ### 4.3 `MultiPipeServer` の合算
 
+現行実装は接続スレッドを `detach()` するため、`active_connections_` コンテナを持たない
+（`active_count_: std::atomic<std::size_t>` + `SlotGuard` RAII で管理）。
+接続終了済みセッションの統計を失わないよう、`Impl` に累積バッファを追加し、
+`SlotGuard` デストラクタで取り込む設計とする。
+
 ```cpp
-// multi_pipe_server.cpp
-PipeStats MultiPipeServer::stats() const noexcept {
-    // 各接続ハンドラが保持するローカルカウンタを合算して返す
-    PipeStats total{};
-    std::lock_guard lk{connections_mutex_};
-    for (const auto& conn : active_connections_) {
-        total += conn->stats();
+// multi_pipe_server.cpp — MultiPipeServer::Impl 追加フィールド
+struct MultiPipeServer::Impl {
+    // ... 既存フィールド (active_count_, done_cv_, 等) ...
+
+    // 終了済みセッション統計の累積バッファ（mutex で保護）
+    mutable std::mutex accumulated_mutex_;
+    PipeStats          accumulated_stats_{};
+};
+
+// SlotGuard デストラクタ — セッション終了時に統計を取り込む
+SlotGuard::~SlotGuard() {
+    {
+        // セッション (PipeServer conn) の統計を累積バッファへ加算
+        std::lock_guard lk{impl_.accumulated_mutex_};
+        impl_.accumulated_stats_ += conn_.stats();
     }
-    return total;
+    impl_.active_count_.fetch_sub(1, std::memory_order_acq_rel);
+    impl_.done_cv_.notify_all();
 }
 
+// stats() — 累積バッファのスナップショットを返す
+PipeStats MultiPipeServer::stats() const noexcept {
+    // detach 運用のためアクティブセッションのポインタを保持しない。
+    // 統計はセッション終了時に accumulated_stats_ へ取り込まれ、
+    // アクティブセッションの現在値はセッションが閉じると反映される。
+    std::lock_guard lk{impl_->accumulated_mutex_};
+    return impl_->accumulated_stats_;
+}
+
+// reset_stats() — 累積バッファのみクリア（アクティブセッションには作用しない）
 void MultiPipeServer::reset_stats() noexcept {
-    std::lock_guard lk{connections_mutex_};
-    for (auto& conn : active_connections_) {
-        conn->reset_stats();
-    }
+    std::lock_guard lk{impl_->accumulated_mutex_};
+    impl_->accumulated_stats_ = PipeStats{};
 }
 ```
+
+> **設計上のトレードオフ**: アクティブセッションの統計は、そのセッションが
+> 閉じるまで `stats()` に反映されない。長寿命の接続が多い環境では
+> `stats()` が過去のセッション分しか返さない点に注意すること
+> （短命接続が多いサーバー監視用途では実用上問題ない）。
 
 ---
 
@@ -702,7 +734,7 @@ class PipeStats:
 | TC9 | `stats_thread_safe_send` | 複数スレッドから並列 `send()` しても `messages_sent` が正確にカウントされること |
 | TC10 | `stats_plus_operator` | `operator+` で 2 つの `PipeStats` を加算できること |
 | TC11 | `stats_pipe_client_avg_rtt_zero` | `PipeClient` の `avg_round_trip_ns()` は常に 0 であること |
-| TC12 | `stats_multi_server_aggregation` | `MultiPipeServer::stats()` が全接続の合算を返すこと |
+| TC12 | `stats_multi_server_aggregation` | セッション終了後に `MultiPipeServer::stats()` が累積統計を返すこと |
 
 ### 10.2 Python テスト（`tests/python/test_stats.py`）
 
@@ -751,8 +783,12 @@ class PipeStats:
    「リセット前の操作がリセット後にカウントされた」という正常なレースコンディションである。
    定期的にリセットする用途（差分計算）ではこの挙動を考慮すること。
 
-6. **`MultiPipeServer::reset_stats()` の注意**: 接続ロックを取得して全接続をリセットするため、
-   大量接続が存在する場合はわずかに遅延が生じる。
+6. **`MultiPipeServer::stats()` のリアルタイム性**: アクティブセッションの統計は
+   セッション終了時（`SlotGuard` デストラクタ内）に `accumulated_stats_` へ加算されるため、
+   接続中のセッションが送受信したデータは `stats()` に即時反映されない。
+   セッションが閉じると反映される。短命接続が多い用途では実用上問題ない。
+   リアルタイム反映が必須な場合は `active_connections_` コンテナの追加を検討すること
+   （ただし大量接続時の `stats()` 呼び出しコスト増大を伴う）。
 
 7. **`PipeStats` は値型**: コピー・ムーブを提供する（`= default`）。
    Python 側では `stats()` が呼ばれるたびに新しい `PyPipeStats` オブジェクトを生成する。

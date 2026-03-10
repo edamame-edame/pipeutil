@@ -83,12 +83,14 @@
 	**影響**: 長時間稼働時に `messages_sent/bytes_sent` が接続終了のたびに見えなくなり、監視値が実トラフィックを過小表示する。実装時に仕様と既存構造が衝突し、設計再作業が発生する。
 	**根拠**: `spec/F006_diagnostics_metrics.md:33` は `全接続合算` を必須化している一方、`spec/F006_diagnostics_metrics.md:327-335` は `active_connections_` のみを走査。現行 `source/core/src/multi_pipe_server.cpp:109,133,158` は `active_count_` と detach 運用で、接続オブジェクトを保持する `active_connections_` は存在しない。
 	**対応状況**: Open
+	→ `spec/F006_diagnostics_metrics.md` の §2.1 原則#6 / §4.3 擬似コード / §10.1 TC12 / §11.6 を修正。`MultiPipeServer::Impl` に `mutable std::mutex accumulated_mutex_` + `PipeStats accumulated_stats_{}` を追加し、`SlotGuard` デストラクタ内で `impl_.accumulated_stats_ += conn_.stats()` を実行する設計に変更。`stats()` は `accumulated_stats_` のスナップショットを返す。アクティブセッションの統計はセッション終了後に反映される旨を注記。✅
 
 - R-062 (Medium, Spec-Consistency)
 	**指摘**: `errors` カウント方針が本文内で矛盾している。実装例では `catch (...)` で全例外をカウントしているが、制約章では `PipeException` のみカウントすると定義している。
 	**影響**: 実装者によって `std::bad_alloc` など非 `PipeException` を含める/含めない挙動が分岐し、メトリクス互換性が崩れる。
 	**根拠**: `spec/F006_diagnostics_metrics.md:246,306` のコード例は `catch (...)` で `stat_errors_` を加算。`spec/F006_diagnostics_metrics.md:740-742` は `PipeException` のみカウントと明記。
 	**対応状況**: Open
+	→ `spec/F006_diagnostics_metrics.md` の §4.1 / §4.2 のコード例内 `catch (...)` を `catch (const PipeException&)` に修正し、§11.4 の方針（`PipeException` のみカウント）と一致させた。✅
 
 ---
 
