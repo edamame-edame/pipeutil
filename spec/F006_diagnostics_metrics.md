@@ -89,10 +89,10 @@ tests/python/
 5. **バイト数**: ペイロードのバイト数のみカウントする（フレームヘッダ 20 バイトは含まない）。
    ユーザーが意識するデータ量と一致させるため。
 6. **MultiPipeServer の合算**: 各セッションは `shared_ptr<SessionStats>` を通じて統計を書き込む。
-   `Impl` はアクティブセッションの `shared_ptr` リスト（mutex 保護）と終了済みセッションの
-   累積バッファ（mutex 保護）を独立して保持する。
-   `stats()` は両者を合算して返す（現在のアクティブ接続を含む真の全接続合算）。
-   `reset_stats()` は累積バッファと全アクティブセッションのカウンタをリセットする。
+   `Impl` は統一の `stats_mutex_` で累積バッファとアクティブリストの両方を保護する。
+   `SlotGuard` デストラクタは同一ロック下で「アクティブリストから除去」と「累積へ加算」を原子的に実行する。
+   `stats()` ・ `reset_stats()` も共に単一ロックを利用する。
+   この設計により `reset_stats()` とセッション終了との競合で旧値が累積へ書き戻される問題を完全に排除する。
 
 ---
 
@@ -323,10 +323,10 @@ Message send_request(const Message& req, std::chrono::milliseconds timeout) {
 
 ### 4.3 `MultiPipeServer` の合算
 
-`detach()` 運用でも「全接続合算」契約と正しい `reset_stats()` を実現するため、
-各セッションが `shared_ptr<SessionStats>` を通じてカウンタを書き込む設計とする。
-`Impl` はアクティブセッション分の `shared_ptr` リストと終了済みセッションの累積バッファを持ち、
-`stats()` は両者を合算、`reset_stats()` は両者を一斉にリセットする。
+`detach()` 運用でも「全接続合算」契約と競合安全な `reset_stats()` を実現するため、
+`accumulated_stats_` と `active_stats_` を単一の `stats_mutex_` で保護する設計とする。
+`SlotGuard::~SlotGuard()` は同一ロック下で「アクティブリストから除去」と「累積へ加算」を原子的に行い、
+`reset_stats()` の割り込みを排除する。
 
 ```cpp
 // multi_pipe_server.cpp — セッション単位の統計バッファ（Impl 内部型）
@@ -360,35 +360,30 @@ struct SessionStats {
 struct MultiPipeServer::Impl {
     // ... 既存フィールド (active_count_, done_cv_, 等) ...
 
-    // 終了済みセッション統計の累積バッファ
-    mutable std::mutex accumulated_mutex_;
-    PipeStats          accumulated_stats_{};
-
-    // アクティブセッションの統計ハンドル（shared_ptr で生存管理）
-    mutable std::mutex                             active_stats_mutex_;
-    std::vector<std::shared_ptr<SessionStats>>    active_stats_;
+    // 統一メトリクスムテックス： accumulated_stats_ と active_stats_ を一丁化して保護
+    // SlotGuard::~SlotGuard() ・ stats() ・ reset_stats() が共にこれを使用する
+    mutable std::mutex                          stats_mutex_;
+    PipeStats                                   accumulated_stats_{};
+    std::vector<std::shared_ptr<SessionStats>>  active_stats_;
 };
 
 // ハンドラスレッド生成時 — shared_ptr を作成して Impl と接続スレッドで共有
 auto session = std::make_shared<SessionStats>();
 {
-    std::lock_guard lk{active_stats_mutex_};
+    std::lock_guard lk{stats_mutex_};
     active_stats_.push_back(session);
 }
 // session を PipeServer コンストラクタ（F-006 実装フェーズで拡張）に渡し、
 // PipeServer 内の send/receive カウントをこのバッファへ書き込む。
 
-// SlotGuard デストラクタ — セッション終了時にアクティブリストを除去し累積へ加算
+// SlotGuard デストラクタ — 単一ロック下で除去+加算を原子的に実行
 SlotGuard::~SlotGuard() {
     {
-        // アクティブリストから除去（ロック取得・解放）
-        std::lock_guard al{impl_.active_stats_mutex_};
+        // stats_mutex_ 1本で「アクティブリストから除去」と「累積へ加算」を原子化する。
+        // reset_stats() との競合で旧値が累積へ書き戻される問題を完全に排除する。
+        std::lock_guard lk{impl_.stats_mutex_};
         auto& v = impl_.active_stats_;
         v.erase(std::remove(v.begin(), v.end(), session_), v.end());
-    }
-    {
-        // 終了統計を累積バッファへ加算（ロック取得・解放）
-        std::lock_guard cl{impl_.accumulated_mutex_};
         impl_.accumulated_stats_ += session_->snapshot();
     }
     if (impl_.active_count_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
@@ -397,43 +392,29 @@ SlotGuard::~SlotGuard() {
     }
 }
 
-// stats() — 累積バッファ + アクティブセッション合算（全接続合算）
+// stats() — 単一ロック下で累積バッファ + アクティブセッション合算
 PipeStats MultiPipeServer::stats() const noexcept {
-    PipeStats total{};
-    {
-        std::lock_guard lk{impl_->accumulated_mutex_};
-        total = impl_->accumulated_stats_;
-    }
-    {
-        // 各ロックを独立して取得するため、両ロック同時保持によるデッドロックを回避する
-        std::lock_guard lk{impl_->active_stats_mutex_};
-        for (const auto& s : impl_->active_stats_) {
-            total += s->snapshot();
-        }
+    std::lock_guard lk{impl_->stats_mutex_};
+    PipeStats total = impl_->accumulated_stats_;
+    for (const auto& s : impl_->active_stats_) {
+        total += s->snapshot();
     }
     return total;
 }
 
-// reset_stats() — 累積バッファ + 全アクティブセッションを一斉リセット
+// reset_stats() — 単一ロック下で累積バッファ + 全アクティブセッションを原子的にリセット
 void MultiPipeServer::reset_stats() noexcept {
-    {
-        std::lock_guard lk{impl_->accumulated_mutex_};
-        impl_->accumulated_stats_ = PipeStats{};
-    }
-    {
-        std::lock_guard lk{impl_->active_stats_mutex_};
-        for (auto& s : impl_->active_stats_) {
-            s->reset();
-        }
+    std::lock_guard lk{impl_->stats_mutex_};
+    impl_->accumulated_stats_ = PipeStats{};
+    for (auto& s : impl_->active_stats_) {
+        s->reset();
     }
 }
 ```
 
-> **スナップショットの競合ウィンドウ**: `stats()` は `accumulated_mutex_` と
-> `active_stats_mutex_` を独立して取得するため、両者のスナップショット間に
-> ごく短い競合ウィンドウが生じる。この不一致は診断・モニタリング用途では許容範囲。
-> `reset_stats()` も同様に 2 フェーズで実行されるため、リセット直前後の `stats()` 結果は
-> 完全に原子的ではない（これも診断用途では許容範囲）。
+> **単一ロックのトレードオフ**: `stats()` はアクティブセッションが多い場合に `O(n)` のリスト走査を伴う（`n` = アクティブ接続数）。
+> 最大 64 接続の制約下では診断用途として十分高速であり、ロック保持時間は微小。
+> ホットパスでの頻繁な呼び出しは避り、定期ポーリング（例: 1 秒間隔）で利用すること。
 
 ---
 
@@ -799,7 +780,7 @@ class PipeStats:
 | TC9 | `stats_thread_safe_send` | 複数スレッドから並列 `send()` しても `messages_sent` が正確にカウントされること |
 | TC10 | `stats_plus_operator` | `operator+` で 2 つの `PipeStats` を加算できること |
 | TC11 | `stats_pipe_client_avg_rtt_zero` | `PipeClient` の `avg_round_trip_ns()` は常に 0 であること |
-| TC12 | `stats_multi_server_aggregation` | アクティブセッション中と終了後いずれも `MultiPipeServer::stats()` が全接続の合算を返すこと |
+| TC12 | `stats_multi_server_aggregation` | アクティブセッション中と終了後いずれも `MultiPipeServer::stats()` が全接続の合算を返すこと，および `reset_stats()` 後に旧値が混入しないこと |
 
 ### 10.2 Python テスト（`tests/python/test_stats.py`）
 
@@ -848,12 +829,9 @@ class PipeStats:
    「リセット前の操作がリセット後にカウントされた」という正常なレースコンディションである。
    定期的にリセットする用途（差分計算）ではこの挙動を考慮すること。
 
-6. **`MultiPipeServer::stats()` の一貫性**: `stats()` は `accumulated_mutex_` と
-   `active_stats_mutex_` を独立して取得するため、2 フェーズのスナップショットとなる。
-   大量アクティブ接続時の `stats()` 呼び出しコストは `O(n)`（`n` = アクティブ接続数）であり
-   通常の `PipeClient::stats()` より高い。ホットパスでの頻繁な呼び出しは避けること。
-   `reset_stats()` も 2 フェーズ実行のため、リセット直前後の取得値は完全に原子的ではない
-   （診断用途では許容範囲）。
+6. **`MultiPipeServer` のみのコスト特性**: `stats()` / `reset_stats()` は `stats_mutex_`
+   保持中にアクティブセッションリストを `O(n)` で走査するため、他のクラスの `stats()` よりコストは高い。
+   最大 64 接続の制約下では実用上許容範囲。ホットパスでの頻繁呼び出しは避けること。
 
 7. **`PipeStats` は値型**: コピー・ムーブを提供する（`= default`）。
    Python 側では `stats()` が呼ばれるたびに新しい `PyPipeStats` オブジェクトを生成する。

@@ -1,14 +1,14 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-11 07:17:47
+最終更新: 2026-03-11 07:35:00
 最新レビューCSV: review/20260311071747.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 1
-- 今回再レビューでの新規指摘（Medium 以上）: 1 件
-- 修正確認済み指摘数: 62（R-063 まで集約済み）
-- 今回対象: F-006 詳細設計レビュー（`spec/F006_diagnostics_metrics.md`）
+- 未修正指摘数（Medium 以上）: 0
+- 今回再レビューでの新規指摘（Medium 以上）: 0 件
+- 修正確認済み指摘数: 64（R-064 まで集約済み）
+- 今回対象: F-006 詳細設計 R-064 対応（`spec/F006_diagnostics_metrics.md`）
 
 ---
 
@@ -76,16 +76,13 @@
 - R-061（Metrics-Contract / F-006）: `active_connections_` 前提の擬似コードを撤回し、`detach()` 運用と整合する累積統計バッファ方式へ更新したこと（ただし契約再整備は R-063 で継続）。
 - R-062（Spec-Consistency / F-006）: `errors` カウントを `catch (const PipeException&)` に統一し、制約章の定義と一致させたこと。
 - R-063（Metrics-Contract / F-006）: `SessionStats + active_stats_` 方式へ改め、`stats()` がアクティブ接続を含む全接続合算を返す契約を復元したこと。
+- R-064（Concurrency-Contract / F-006）: `accumulated_mutex_` と `active_stats_mutex_` を `stats_mutex_` 1本に統合し、`SlotGuard::~SlotGuard()` が「active除去＋accumulated加算」を単一ロック下で原子的に実行するよう改め、`reset_stats()` との競合を完全排除したこと。
 
 ---
 
 ## 3. 未修正指摘（Medium 以上）
 
-- R-064 (High, Concurrency-Contract)
-	**指摘**: `reset_stats()` と `SlotGuard::~SlotGuard()` の競合で、リセット前トラフィックの後追い再混入が依然として起こり得る。`SlotGuard` は active リストから削除してから累積へ加算し、`reset_stats()` は累積クリア後に active を走査するため、セッション終了がその間に入ると旧値が累積へ書き戻される。
-	**影響**: 区間計測（reset 後の差分監視）が非決定に破綻し、監視値が実トラフィックより過大になる。運用上もっとも期待される「reset 起点の観測窓」が信頼できない。
-	**根拠**: `spec/F006_diagnostics_metrics.md:387-399`（SlotGuard: active除去→累積加算）と `spec/F006_diagnostics_metrics.md:419-430`（reset: 累積クリア→activeリセット）を組み合わせると、active 走査から外れたセッションの旧 snapshot が reset 後に累積へ投入される競合が成立する。§11.6 の「非原子的」注記はこの破綻を許容範囲として明示していない。
-	**対応状況**: Open
+現在、未修正指摘はありません。
 
 ---
 
