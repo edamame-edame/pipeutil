@@ -85,6 +85,7 @@
 	**影響**: 稼働中セッションの送受信が監視値に即時反映されず恒常的に過小表示となる。さらに `reset_stats()` 後にアクティブセッションが終了すると旧トラフィックが後追い加算され、区間計測が破綻する。
 	**根拠**: `spec/F006_diagnostics_metrics.md:33` は `全接続合算` を必須とする一方、`spec/F006_diagnostics_metrics.md:95,354-362,368-371,786-790` はアクティブセッション非反映と `reset_stats()` の非作用を明記。既存 `source/core/src/multi_pipe_server.cpp:109-154` は `active_count_` + detach 運用で、契約整合の再定義が必要。
 	**対応状況**: Open
+	→ `spec/F006_diagnostics_metrics.md` の §2.1 原則#6 / §4.3 擬似コード / §10.1 TC12 / §11.6 を修正。`SessionStats` 構造体（atomic フィールド + `snapshot()` + `reset()`）を導入し、`Impl` に `active_stats_mutex_` + `vector<shared_ptr<SessionStats>>` を追加する設計へ変更。`stats()` は累積バッファとアクティブセッションスナップショットを合算（全接続合算契約を維持）。`reset_stats()` は累積バッファと全アクティブセッションの両方をリセット（後追い加算問題を解消）。✅
 
 ---
 
