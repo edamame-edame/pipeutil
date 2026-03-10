@@ -1,13 +1,13 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-11 07:09:09
-最新レビューCSV: review/20260311070909.csv
+最終更新: 2026-03-11 07:17:47
+最新レビューCSV: review/20260311071747.csv
 
 ## 1. 最新レビューの要約
 
 - 未修正指摘数（Medium 以上）: 1
 - 今回再レビューでの新規指摘（Medium 以上）: 1 件
-- 修正確認済み指摘数: 61（R-062 まで集約済み）
+- 修正確認済み指摘数: 62（R-063 まで集約済み）
 - 今回対象: F-006 詳細設計レビュー（`spec/F006_diagnostics_metrics.md`）
 
 ---
@@ -75,17 +75,17 @@
 - R-060（Spec-Consistency / F-003）: §8.1 の `ReconnectingPipeClient` シグネチャ記述を本文 API と一致させること。
 - R-061（Metrics-Contract / F-006）: `active_connections_` 前提の擬似コードを撤回し、`detach()` 運用と整合する累積統計バッファ方式へ更新したこと（ただし契約再整備は R-063 で継続）。
 - R-062（Spec-Consistency / F-006）: `errors` カウントを `catch (const PipeException&)` に統一し、制約章の定義と一致させたこと。
+- R-063（Metrics-Contract / F-006）: `SessionStats + active_stats_` 方式へ改め、`stats()` がアクティブ接続を含む全接続合算を返す契約を復元したこと。
 
 ---
 
 ## 3. 未修正指摘（Medium 以上）
 
-- R-063 (High, Metrics-Contract)
-	**指摘**: `MultiPipeServer::stats()` 契約が「全接続合算」から「終了済みセッションのみ」へ変質しており、`reset_stats()` も累積バッファしかクリアしないためアクティブセッション分をリセットできない。
-	**影響**: 稼働中セッションの送受信が監視値に即時反映されず恒常的に過小表示となる。さらに `reset_stats()` 後にアクティブセッションが終了すると旧トラフィックが後追い加算され、区間計測が破綻する。
-	**根拠**: `spec/F006_diagnostics_metrics.md:33` は `全接続合算` を必須とする一方、`spec/F006_diagnostics_metrics.md:95,354-362,368-371,786-790` はアクティブセッション非反映と `reset_stats()` の非作用を明記。既存 `source/core/src/multi_pipe_server.cpp:109-154` は `active_count_` + detach 運用で、契約整合の再定義が必要。
+- R-064 (High, Concurrency-Contract)
+	**指摘**: `reset_stats()` と `SlotGuard::~SlotGuard()` の競合で、リセット前トラフィックの後追い再混入が依然として起こり得る。`SlotGuard` は active リストから削除してから累積へ加算し、`reset_stats()` は累積クリア後に active を走査するため、セッション終了がその間に入ると旧値が累積へ書き戻される。
+	**影響**: 区間計測（reset 後の差分監視）が非決定に破綻し、監視値が実トラフィックより過大になる。運用上もっとも期待される「reset 起点の観測窓」が信頼できない。
+	**根拠**: `spec/F006_diagnostics_metrics.md:387-399`（SlotGuard: active除去→累積加算）と `spec/F006_diagnostics_metrics.md:419-430`（reset: 累積クリア→activeリセット）を組み合わせると、active 走査から外れたセッションの旧 snapshot が reset 後に累積へ投入される競合が成立する。§11.6 の「非原子的」注記はこの破綻を許容範囲として明示していない。
 	**対応状況**: Open
-	→ `spec/F006_diagnostics_metrics.md` の §2.1 原則#6 / §4.3 擬似コード / §10.1 TC12 / §11.6 を修正。`SessionStats` 構造体（atomic フィールド + `snapshot()` + `reset()`）を導入し、`Impl` に `active_stats_mutex_` + `vector<shared_ptr<SessionStats>>` を追加する設計へ変更。`stats()` は累積バッファとアクティブセッションスナップショットを合算（全接続合算契約を維持）。`reset_stats()` は累積バッファと全アクティブセッションの両方をリセット（後追い加算問題を解消）。✅
 
 ---
 
