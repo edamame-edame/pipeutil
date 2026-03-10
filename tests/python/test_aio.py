@@ -111,3 +111,50 @@ async def test_async_pipe_name_property() -> None:
         await client.connect(timeout_ms=3000)
 
     await server_task
+
+
+# ─── テスト 6: native 不在時の to_thread フォールバック確認 ─────────────
+# 仕様: spec/F004p2_async_native.md §9 テスト No.6
+
+@pytest.mark.asyncio
+async def test_fallback_when_native_absent() -> None:
+    """
+    _pipeutil_async がない環境で AsyncPipeClient が to_thread ベースで動作することを確認する。
+    importlib.reload と sys.modules 操作でネイティブモジュールを隠してリロードする。
+    """
+    import importlib
+    import sys
+
+    # _pipeutil_async を sys.modules から一時隠蔽
+    async_mod_key = "pipeutil._pipeutil_async"
+    native_mod_key = "pipeutil._aio_native"
+    aio_mod_key = "pipeutil.aio"
+
+    saved_async = sys.modules.pop(async_mod_key, None)
+    saved_native = sys.modules.pop(native_mod_key, None)
+    # pipeutil.aio は import 済み → reload で再評価させる
+    saved_aio = sys.modules.pop(aio_mod_key, None)
+
+    # sys.modules に None をセットすると import 時に ImportError が発生する
+    # (ディスク上に .pyd が存在しても再ロードをブロックできる)
+    sys.modules[async_mod_key] = None  # type: ignore[assignment]
+    sys.modules[native_mod_key] = None  # type: ignore[assignment]
+
+    try:
+        # _pipeutil_async が存在しない状態で aio を再 import → Phase 1 扱いになる
+        import pipeutil.aio as aio_reloaded
+
+        assert not aio_reloaded.is_native(), (
+            "is_native() should return False when _pipeutil_async is absent"
+        )
+    finally:
+        # None センチネルを削除してから元の状態を復元
+        sys.modules.pop(async_mod_key, None)
+        sys.modules.pop(native_mod_key, None)
+        sys.modules.pop(aio_mod_key, None)
+        if saved_aio is not None:
+            sys.modules[aio_mod_key] = saved_aio
+        if saved_native is not None:
+            sys.modules[native_mod_key] = saved_native
+        if saved_async is not None:
+            sys.modules[async_mod_key] = saved_async

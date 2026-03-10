@@ -58,3 +58,48 @@ if(WIN32)
             "${_PIPEUTIL_PY_PACKAGE_DIR}/$<TARGET_FILE_NAME:pipeutil_core>"
     )
 endif()
+
+# ─── _pipeutil_async: native async I/O 拡張 (Phase 2) ────────────────────────
+# cmake -DPIPEUTIL_WITH_ASYNC=ON で有効化（spec/F004p2_async_native.md §7.2）
+if(PIPEUTIL_WITH_ASYNC)
+    Python3_add_library(_pipeutil_async MODULE WITH_SOABI
+        py_async_pipe.cpp
+        py_async_module.cpp
+    )
+
+    target_include_directories(_pipeutil_async PRIVATE
+        ${Python3_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}   # py_async_pipe.hpp 等の自モジュールヘッダ
+    )
+
+    target_link_libraries(_pipeutil_async PRIVATE pipeutil_core)
+    target_compile_features(_pipeutil_async PRIVATE cxx_std_20)
+
+    target_compile_options(_pipeutil_async PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /utf-8 /wd4251 /wd4275>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
+    )
+
+    set_target_properties(_pipeutil_async PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${_PIPEUTIL_PY_PACKAGE_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${_PIPEUTIL_PY_PACKAGE_DIR}"
+    )
+
+    foreach(cfg Debug Release RelWithDebInfo MinSizeRel)
+        string(TOUPPER "${cfg}" CFG_UPPER)
+        set_target_properties(_pipeutil_async PROPERTIES
+            "LIBRARY_OUTPUT_DIRECTORY_${CFG_UPPER}" "${_PIPEUTIL_PY_PACKAGE_DIR}"
+            "RUNTIME_OUTPUT_DIRECTORY_${CFG_UPPER}" "${_PIPEUTIL_PY_PACKAGE_DIR}"
+        )
+    endforeach()
+
+    if(WIN32)
+        target_link_libraries(_pipeutil_async PRIVATE kernel32)
+        # _pipeutil と同様に、_pipeutil_async 用にも core DLL をパッケージ直下へコピー
+        add_custom_command(TARGET _pipeutil_async POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:pipeutil_core>
+                "${_PIPEUTIL_PY_PACKAGE_DIR}/$<TARGET_FILE_NAME:pipeutil_core>"
+        )
+    endif()
+endif()

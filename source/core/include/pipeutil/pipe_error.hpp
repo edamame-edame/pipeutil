@@ -32,9 +32,10 @@ enum class PipeErrorCode : int {
     InvalidMessage   = 22,  // フレーミングエラー（magic/version/CRC 不一致）
 
     // その他
-    InvalidArgument  = 30,
-    NotSupported     = 31,
-    Interrupted      = 32,  // accept 操作が stop_accept() によって中断された
+    InvalidArgument      = 30,
+    NotSupported         = 31,
+    Interrupted          = 32,  // accept 操作が stop_accept() によって中断された
+    TooManyConnections   = 33,  // R-044: 非同期接続数上限 (64) 超過
 };
 
 // PipeErrorCode を std::error_category に変換するユーティリティ（内部実装用）

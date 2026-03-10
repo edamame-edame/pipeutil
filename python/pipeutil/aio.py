@@ -14,6 +14,27 @@ from typing import Awaitable, Callable, Optional
 
 from . import Message, PipeClient, PipeServer, RpcPipeClient, RpcPipeServer
 
+# ─── Phase 2 native backend 検出 ─────────────────────────────────────
+# _pipeutil_async がビルド済みなら native IOCP/epoll バックエンドを使用。
+# 未ビルド（PIPEUTIL_WITH_ASYNC=OFF）の場合は Phase 1 (to_thread) にフォールバック。
+# 仕様: spec/F004p2_async_native.md §6.1
+try:
+    from ._aio_native import NativeAsyncPipe as _NativeAsyncPipe
+    _NATIVE_BACKEND: bool = True
+except ImportError:
+    _NATIVE_BACKEND = False
+
+
+def is_native() -> bool:
+    """
+    True なら IOCP/epoll ネイティブバックエンドが有効。
+    False なら Phase 1 (asyncio.to_thread) ベース。
+    `pip install pipeutil` であれば常に True（v0.5.0 以降）。
+    ソースビルドで PIPEUTIL_WITH_ASYNC=OFF の場合は False。
+    仕様: spec/F004p2_async_native.md §6.3
+    """
+    return _NATIVE_BACKEND
+
 # ─── バージョン互換ヘルパー ──────────────────────────────────────────
 
 if sys.version_info < (3, 8):
@@ -41,43 +62,64 @@ async def _to_thread(func: Callable[..., object], *args: object) -> object:
 class AsyncPipeClient:
     """
     非同期パイプクライアント。
-    Phase 1: asyncio.to_thread() によるスレッドオフロード実装。
+    Phase 1 (_NATIVE_BACKEND=False): asyncio.to_thread() によるスレッドオフロード実装。
+    Phase 2 (_NATIVE_BACKEND=True):  _pipeutil_async ネイティブ IOCP/epoll バックエンド。
 
-    仕様: spec/F004 §3.2
+    仕様: spec/F004 §3.2 / spec/F004p2_async_native.md §6.2
 
     注意: 1インスタンス = 1イベントループ（仕様 §10.1）。
     """
 
     def __init__(self, pipe_name: str, buffer_size: int = 65536) -> None:
-        self._impl = PipeClient(pipe_name, buffer_size)
+        self._pipe_name = pipe_name
+        if _NATIVE_BACKEND:
+            self._native: Optional["_NativeAsyncPipe"] = _NativeAsyncPipe(buffer_size)  # type: ignore[name-defined]
+            self._impl = None
+        else:
+            self._native = None
+            self._impl = PipeClient(pipe_name, buffer_size)
 
     # ─── 接続 / 通信 ─────────────────────────────────────────────────
 
     async def connect(self, timeout_ms: int = 5000) -> None:
         """接続する。タイムアウト時は PipeTimeoutError を送出。"""
-        await _to_thread(self._impl.connect, timeout_ms)
+        if _NATIVE_BACKEND:
+            await self._native.connect(self._pipe_name, timeout_ms)  # type: ignore[union-attr]
+        else:
+            await _to_thread(self._impl.connect, timeout_ms)  # type: ignore[union-attr]
 
     async def send(self, msg: Message) -> None:
         """メッセージを送信する。接続断時は PipeBrokenError を送出。"""
-        await _to_thread(self._impl.send, msg)
+        if _NATIVE_BACKEND:
+            await self._native.write_frame(msg)  # type: ignore[union-attr]
+        else:
+            await _to_thread(self._impl.send, msg)  # type: ignore[union-attr]
 
     async def receive(self, timeout_ms: int = 5000) -> Message:
         """メッセージを受信する。タイムアウト時は PipeTimeoutError を送出。"""
-        return await _to_thread(self._impl.receive, timeout_ms)  # type: ignore[return-value]
+        if _NATIVE_BACKEND:
+            # R-047 対応: timeout_ms を native backend へ透過的に伝達する
+            return await self._native.read_frame(timeout_ms)  # type: ignore[union-attr]
+        return await _to_thread(self._impl.receive, timeout_ms)  # type: ignore[return-value, union-attr]
 
     async def close(self) -> None:
-        """接続をクローズする（冪等）。close() はノンブロッキングなので to_thread 不要。"""
-        self._impl.close()
+        """接続をクローズする（冪等）。"""
+        if _NATIVE_BACKEND:
+            self._native.close()  # type: ignore[union-attr]
+        else:
+            self._impl.close()  # type: ignore[union-attr]
 
     # ─── プロパティ ───────────────────────────────────────────────────
 
     @property
     def is_connected(self) -> bool:
-        return self._impl.is_connected
+        if _NATIVE_BACKEND:
+            return self._native.is_connected  # type: ignore[union-attr]
+        return self._impl.is_connected  # type: ignore[union-attr]
 
     @property
     def pipe_name(self) -> str:
-        return self._impl.pipe_name
+        return self._pipe_name
 
     # ─── コンテキストマネージャ ───────────────────────────────────────
 
@@ -93,50 +135,89 @@ class AsyncPipeClient:
 class AsyncPipeServer:
     """
     非同期パイプサーバー。
-    Phase 1: asyncio.to_thread() によるスレッドオフロード実装。
+    Phase 1 (_NATIVE_BACKEND=False): asyncio.to_thread() によるスレッドオフロード実装。
+    Phase 2 (_NATIVE_BACKEND=True):  _pipeutil_async ネイティブ IOCP/epoll バックエンド。
 
-    仕様: spec/F004 §3.2
+    仕様: spec/F004 §3.2 / spec/F004p2_async_native.md §6.2
     """
 
     def __init__(self, pipe_name: str, buffer_size: int = 65536) -> None:
-        self._impl = PipeServer(pipe_name, buffer_size)
+        self._pipe_name = pipe_name
+        if _NATIVE_BACKEND:
+            # 接続待機用リスナーハンドル。accept() で server_accept() を呼ぶ。
+            self._native_listener: Optional["_NativeAsyncPipe"] = _NativeAsyncPipe(buffer_size)  # type: ignore[name-defined]
+            self._native_conn: Optional["_NativeAsyncPipe"] = None
+            self._native_listening: bool = False
+            self._impl = None
+        else:
+            self._native_listener = None
+            self._native_conn = None
+            self._native_listening = False
+            self._impl = PipeServer(pipe_name, buffer_size)
 
     # ─── ライフサイクル ───────────────────────────────────────────────
 
     async def listen(self) -> None:
-        """パイプを作成して LISTEN 状態へ移行する。"""
-        # listen() は即時操作（ファイル作成相当）なので to_thread 不要
-        self._impl.listen()
+        """パイプを LISTEN 状態へ移行する。"""
+        if _NATIVE_BACKEND:
+            # native 側ではパイプ作成は server_create_and_accept 内で行われるため、
+            # ここではフラグのみを更新する。
+            self._native_listening = True
+        else:
+            self._impl.listen()  # type: ignore[union-attr]
 
     async def accept(self, timeout_ms: int = 30000) -> None:
         """クライアント接続を待機する。タイムアウト時は PipeTimeoutError。"""
-        await _to_thread(self._impl.accept, timeout_ms)
+        if _NATIVE_BACKEND:
+            self._native_conn = await self._native_listener.server_accept(  # type: ignore[union-attr]
+                self._pipe_name, timeout_ms
+            )
+        else:
+            await _to_thread(self._impl.accept, timeout_ms)  # type: ignore[union-attr]
 
     async def send(self, msg: Message) -> None:
         """メッセージを送信する。"""
-        await _to_thread(self._impl.send, msg)
+        if _NATIVE_BACKEND:
+            await self._native_conn.write_frame(msg)  # type: ignore[union-attr]
+        else:
+            await _to_thread(self._impl.send, msg)  # type: ignore[union-attr]
 
     async def receive(self, timeout_ms: int = 5000) -> Message:
         """メッセージを受信する。タイムアウト時は PipeTimeoutError。"""
-        return await _to_thread(self._impl.receive, timeout_ms)  # type: ignore[return-value]
+        if _NATIVE_BACKEND:
+            return await self._native_conn.read_frame(timeout_ms)  # type: ignore[union-attr]
+        return await _to_thread(self._impl.receive, timeout_ms)  # type: ignore[return-value, union-attr]
 
     async def close(self) -> None:
         """接続をクローズする（冪等）。"""
-        self._impl.close()
+        if _NATIVE_BACKEND:
+            if self._native_conn is not None:
+                self._native_conn.close()
+                self._native_conn = None
+            if self._native_listener is not None:
+                self._native_listener.close()
+                self._native_listener = None
+            self._native_listening = False
+        else:
+            self._impl.close()  # type: ignore[union-attr]
 
     # ─── プロパティ ───────────────────────────────────────────────────
 
     @property
     def is_connected(self) -> bool:
-        return self._impl.is_connected
+        if _NATIVE_BACKEND:
+            return self._native_conn.is_connected if self._native_conn is not None else False
+        return self._impl.is_connected  # type: ignore[union-attr]
 
     @property
     def is_listening(self) -> bool:
-        return self._impl.is_listening
+        if _NATIVE_BACKEND:
+            return self._native_listening
+        return self._impl.is_listening  # type: ignore[union-attr]
 
     @property
     def pipe_name(self) -> str:
-        return self._impl.pipe_name
+        return self._pipe_name
 
     # ─── コンテキストマネージャ ───────────────────────────────────────
 
