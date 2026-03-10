@@ -221,6 +221,15 @@ PyAsyncPipeHandle_async_write_frame(
         return nullptr;
     }
 
+    // (R-055) message_id は uint32_t フィールドに格納されるため事前に範囲を検証する。
+    // 負値や 2^32 超値はラップし、照合不整合を引き起こす可能性がある。
+    if (message_id < 0 || message_id > static_cast<long long>(0xFFFFFFFFLL)) {
+        PyErr_SetString(PyExc_ValueError,
+                        "message_id must be in range [0, 4294967295]");
+        PyBuffer_Release(&payload_buf);
+        return nullptr;
+    }
+
     try {
         self->pipe->async_write_frame(
             static_cast<const std::byte*>(payload_buf.buf),

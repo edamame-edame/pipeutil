@@ -564,19 +564,25 @@ struct AsyncPlatformPipe::Impl {
 
     void do_close() noexcept {
         if (running_.exchange(false, std::memory_order_acq_rel)) {
-            // dispatch_thread_ に停止を通知
+            // (R-052) CancelIoEx → PostQueuedCompletionStatus の順に実行する。
+            // 逆順では kCloseKey センチネルが ERROR_OPERATION_ABORTED 完了通知より先に
+            // IOCP へ到達し、dispatch thread がキャンセル完了をドレインせずに終了する。
+            // その結果 ReadCtx/WriteCtx がリークし、Future が永久 hang する。
+            if (hPipe_ != INVALID_HANDLE_VALUE) {
+                CancelIoEx(hPipe_, nullptr);
+            }
             if (hIocp_) {
                 PostQueuedCompletionStatus(hIocp_, 0, kCloseKey, nullptr);
             }
         }
-        // 進行中 I/O をキャンセル
-        if (hPipe_ != INVALID_HANDLE_VALUE) {
-            CancelIoEx(hPipe_, nullptr);
-            CloseHandle(hPipe_);
-            hPipe_ = INVALID_HANDLE_VALUE;
-        }
+        // CloseHandle は dispatch thread 終了後に実行する（dispatch が IOCP から
+        // 通知を受領中に handle を閉じると不定挙動になるため）。
         if (dispatch_thread_.joinable()) {
             dispatch_thread_.join();
+        }
+        if (hPipe_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(hPipe_);
+            hPipe_ = INVALID_HANDLE_VALUE;
         }
         if (hIocp_) {
             CloseHandle(hIocp_);
@@ -1027,16 +1033,19 @@ void AsyncPlatformPipe::async_write_frame(
 void AsyncPlatformPipe::cancel() noexcept {
     // asyncio スレッド上で呼ばれる（GIL 保持中）
     if (impl_->active_read_cap_ && impl_->sock_fd_ >= 0) {
-        PyObject* fd_obj = PyLong_FromLong(impl_->sock_fd_);
-        if (fd_obj) {
-            PyObject* ret = PyObject_CallMethodObjArgs(
-                // loop を持っていないため best effort: capsule から取得は複雑。
-                // 代わりに asyncio.get_event_loop() を使う
-                // 注: asyncio スレッドで呼ばれるので get_event_loop は有効
-                nullptr,  // placeholder
-                g_str_remove_reader, fd_obj, nullptr);
-            Py_XDECREF(ret);
-            Py_DECREF(fd_obj);
+        // (R-054) loop_obj は LinuxReadCtx capsule から取得する。
+        // nullptr を PyObject_CallMethodObjArgs に渡すと未定義動作によるクラッシュを引き起こす。
+        auto* ctx = static_cast<LinuxReadCtx*>(
+            PyCapsule_GetPointer(impl_->active_read_cap_, "lrc"));
+        if (ctx && ctx->loop_obj) {
+            PyObject* fd_obj = PyLong_FromLong(impl_->sock_fd_);
+            if (fd_obj) {
+                PyObject* ret = PyObject_CallMethodObjArgs(
+                    ctx->loop_obj, g_str_remove_reader, fd_obj, nullptr);
+                if (!ret) PyErr_Clear();
+                Py_XDECREF(ret);
+                Py_DECREF(fd_obj);
+            }
         }
         Py_CLEAR(impl_->active_read_cap_);
     }

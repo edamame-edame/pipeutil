@@ -1,14 +1,14 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-10 11:00:00
-最新レビューCSV: review/20260310110000.csv
+最終更新: 2026-03-10 21:05:05
+最新レビューCSV: review/20260310210505.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 0
-- 今回再レビューでの新規指摘（Medium 以上）: 0 件
-- 修正確認済み指摘数: 50（R-051 を確認し集約）
-- 今回対象: F-004 Phase 2 仕様書レビュー（第5回、R-051 修正確認 + 新規チェック）
+- 未修正指摘数（Medium 以上）: 4
+- 今回再レビューでの新規指摘（Medium 以上）: 4 件（Critical 2 / High 1 / Medium 1）
+- 修正確認済み指摘数: 50（R-051 まで集約済み）
+- 今回対象: F-004 Phase 2 実装レビュー（直前コミット `ee9d467` 差分）
 
 ---
 
@@ -69,7 +69,49 @@
 
 ## 3. 未修正指摘（Medium 以上）
 
-なし
+### R-052 (Critical) Concurrency-Lifecycle
+
+**指摘**: `do_close()` が停止キー (`kCloseKey`) を先に IOCP へ投入し、その後 `CancelIoEx` を実行しているため、dispatch thread が停止キーを先に消費すると pending I/O 完了通知 (`ERROR_OPERATION_ABORTED`) を処理しないまま終了する。
+→ `source/python/py_async_pipe.cpp` の `do_close()` を修正: `CancelIoEx` をセンチネル投入前に移動し、`CloseHandle(hPipe_)` を `dispatch_thread_.join()` 後に移動しました。これにより dispatch thread が全キャンセル完了通知をドレインしてからセンチネルを受け取ることが保証されます。✅
+
+**影響**: pending `ReadCtx`/`WriteCtx` の `delete` と future 完了通知が行われず、メモリリーク・Future待機ハング・close 後不定挙動を引き起こす。
+
+**根拠**: `source/python/py_async_pipe.cpp` の `run_dispatch()` は `if (key == kCloseKey) break;` で即時終了し、`GetQueuedCompletionStatus` の取り出し順は保証されないため cancel 完了通知のドレインが保証されない。
+
+**対応状況**: 修正済み
+
+### R-053 (High) Platform-Contract
+
+**指摘**: `aio.py` の native 判定が `_aio_native` import 成否のみで、Linux 実装が未完成でも `_NATIVE_BACKEND=True` になる。
+→ `python/pipeutil/aio.py` の native 判定に `sys.platform == "win32"` ガードを追加しました。Linux 環境では import が成功しても `_NATIVE_BACKEND = False` となり Phase 1 バックエンドを維持します。✅
+
+**影響**: Linux 環境で Phase 2 経路に入り、実行時に `NotImplementedError` が発生して API のクロスプラットフォーム契約を破る。
+
+**根拠**: `python/pipeutil/aio.py` は `try: from ._aio_native import ...` 成功時に native 有効化。`source/python/py_async_module.cpp` の `_on_linux_readable` / `_on_linux_writable` は `NotImplementedError` を送出する暫定実装。
+
+**対応状況**: 修正済み
+
+### R-054 (Critical) Python-CAPI
+
+**指摘**: Linux 分岐 `cancel()` で `PyObject_CallMethodObjArgs(nullptr, ...)` を呼び出しており、メソッド呼び出し対象 `PyObject*` が null のまま C-API を実行している。
+→ `source/python/py_async_pipe.cpp` の Linux `cancel()` を修正: `nullptr` を `LinuxReadCtx::loop_obj`（capsule から取得）に置き換え、エラー時は `PyErr_Clear()` を追加しました。✅
+
+**影響**: `cancel()` 実行時にクラッシュ（セグメンテーションフォルト等）を誘発する。
+
+**根拠**: `source/python/py_async_pipe.cpp` Linux 実装の `AsyncPlatformPipe::cancel()` に null receiver 呼び出しが存在する。CPython C-API は有効な `obj` を要求する。
+
+**対応状況**: 修正済み
+
+### R-055 (Medium) API-Contract
+
+**指摘**: `async_write_frame` の `message_id` は `long long` 受け取り後に範囲検証なしで `uint32_t` へキャストされる。
+→ `source/python/py_async_module.cpp` の `async_write_frame` に `[0, 4294967295]` 範囲検証を追加しました。範囲外の場合は `ValueError` を送出し `PyBuffer_Release` で buf を解放します。✅
+
+**影響**: 負値・上限超過値がラップし、message_id 照合不一致やトレース不能な通信不整合を生む。
+
+**根拠**: `source/python/py_async_module.cpp` の `PyAsyncPipeHandle_async_write_frame` で `static_cast<uint32_t>(message_id)` 前の `[0, UINT32_MAX]` 検証が欠落している。
+
+**対応状況**: 修正済み
 
 ---
 
