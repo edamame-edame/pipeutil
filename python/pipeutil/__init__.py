@@ -48,6 +48,14 @@ from .message_utils import (   # noqa: F401
     CodecError,
 )
 
+# [R] 自動再接続クライアント群（F-003）
+from .reconnecting_client import (  # noqa: F401
+    ReconnectingPipeClient,
+    AsyncReconnectingPipeClient,
+    ReconnectingRpcPipeClient,
+    MaxRetriesExceededError,
+)
+
 __all__ = [
     # ─── コア（C 拡張） ───────────────────────────────────────────────
     "Message",
@@ -81,6 +89,11 @@ __all__ = [
     "encode_msgpack",
     "decode_msgpack",
     "CodecError",
+    # ─── 自動再接続クライアント [R] ───────────────────────────────────
+    "ReconnectingPipeClient",
+    "AsyncReconnectingPipeClient",
+    "ReconnectingRpcPipeClient",
+    "MaxRetriesExceededError",
 ]
 
 __version__: str = "0.5.0"

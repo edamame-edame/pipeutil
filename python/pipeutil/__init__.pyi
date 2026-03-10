@@ -359,3 +359,12 @@ def decode_msgpack(
     raw: bool = ...,
     **unpack_kwargs: Any,
 ) -> Any: ...
+
+# ─── 自動再接続クライアント [R]（pipeutil.reconnecting_client から re-export）─
+
+from .reconnecting_client import (
+    MaxRetriesExceededError as MaxRetriesExceededError,
+    ReconnectingPipeClient as ReconnectingPipeClient,
+    AsyncReconnectingPipeClient as AsyncReconnectingPipeClient,
+    ReconnectingRpcPipeClient as ReconnectingRpcPipeClient,
+)
