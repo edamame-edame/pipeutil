@@ -146,6 +146,8 @@ with client:
 - `send` / `receive` で `PipeException(ConnectionReset | BrokenPipe)` を捕捉し、
   `connect()` をリトライしてから再試行
 
+> **詳細設計書**: [`spec/F003_reconnecting_pipe_client.md`](../spec/F003_reconnecting_pipe_client.md)
+
 ---
 
 ### F-004 — asyncio / threading / multiprocessing 対応
