@@ -35,12 +35,12 @@ while True:
 |---|---|
 | Python レイヤーのみ実装 | ✅ 必須 |
 | C++ コア変更 | ❌ 不要 |
-| `send()` / `receive()` の自動再接続 | ✅ 必須 |
+| `send()` / `receive()` の自動再接続（同期版） | ✅ 必須 |
 | 最大リトライ回数制限（`0` = 無限） | ✅ 必須 |
 | 再接続成功コールバック（`on_reconnect`） | ✅ 必須 |
-| スレッドセーフ | ✅ `threading.Lock` で保護 |
+| スレッドセーフ（同期版） | ✅ `threading.Lock` で保護 |
+| asyncio 統合（`AsyncReconnectingPipeClient`） | ✅ F-004 実装済みのため本 spec で対応 |
 | RPC（`send_request()`） 対応 | ❌ 対象外（v0.3.0 では提供しない） |
-| asyncio 統合 | ❌ 対象外（F-004 `AsyncPipeClient` で別途検討） |
 
 ---
 
@@ -48,32 +48,55 @@ while True:
 
 ```
 python/pipeutil/
-  reconnecting_client.py     ← 新規: ReconnectingPipeClient / MaxRetriesExceededError
+  reconnecting_client.py     ← 新規: ReconnectingPipeClient / AsyncReconnectingPipeClient
+                                        / MaxRetriesExceededError
   __init__.py                ← 更新: re-export を追加
   __init__.pyi               ← 更新: 型スタブを追加
 
 tests/python/
-  test_reconnecting.py       ← 新規: 12 件
+  test_reconnecting.py       ← 新規: 12 件（同期）+ 8 件（非同期）= 20 件
 ```
 
 ### 2.1 クラス関係
 
 ```
+[同期版]
 ReconnectingPipeClient
   ├─ _impl: PipeClient          ← 実際の I/O を担当
   ├─ _lock: threading.Lock      ← 再接続クリティカルセクション保護
   ├─ _closed: bool              ← close() 後の操作ガード
   └─ _retry_count: int          ← 今セッション通算の再接続成功回数
+
+[非同期版]
+AsyncReconnectingPipeClient
+  ├─ _impl: AsyncPipeClient     ← 実際の非同期 I/O を担当（aio.py）
+  ├─ _lock: asyncio.Lock        ← 再接続クリティカルセクション保護
+  ├─ _closed: bool              ← close() 後の操作ガード
+  └─ _retry_count: int          ← 今セッション通算の再接続成功回数
 ```
 
-`PipeClient` 以外の C 拡張型には依存しない。
+`PipeClient` / `AsyncPipeClient` 以外の C 拡張型には依存しない。
 `_impl` は `__init__` 内で生成し、クラスのライフサイクルを通じて同一インスタンスを再利用する。
+
+`asyncio.Lock` はイベントループにバインドされるため、`AsyncReconnectingPipeClient` は
+**1 インスタンス = 1 イベントループ**（`AsyncPipeClient` と同じ制約）。
 
 ---
 
 ## 3. API 設計
 
-### 3.1 コンストラクタ
+本 spec では 2 つのクラスを定義する。
+
+| クラス | 用途 | I/O モデル |
+|---|---|---|
+| `ReconnectingPipeClient` | スレッドブロッキング用 | `PipeClient`（同期 I/O）|
+| `AsyncReconnectingPipeClient` | asyncio コルーチン用 | `AsyncPipeClient`（非同期 I/O）|
+
+両クラスはコンストラクタシグネチャ・プロパティ・例外クラスを共有する。
+
+---
+
+### 3.1 コンストラクタ（共通パラメータ）
 
 ```python
 class ReconnectingPipeClient:
@@ -87,7 +110,22 @@ class ReconnectingPipeClient:
         on_reconnect: Callable[[], None] | None = None,
         buffer_size: int = 65536,
     ) -> None: ...
+
+class AsyncReconnectingPipeClient:
+    def __init__(
+        self,
+        pipe_name: str,
+        *,
+        retry_interval_ms: int = 500,
+        max_retries: int = 0,
+        connect_timeout_ms: int = 5000,
+        on_reconnect: Callable[[], None] | None = None,
+        buffer_size: int = 65536,
+    ) -> None: ...
 ```
+
+`AsyncReconnectingPipeClient` のコンストラクタは同期関数。
+`asyncio.Lock` の初期化はコンストラクタ内で行う（Python 3.10+ で非推奨の引数レス `asyncio.Lock()` が 3.8–3.9 では唯一の方法であり互換性あり）。
 
 | パラメータ | 型 | デフォルト | 説明 |
 |---|---|:---:|---|
@@ -95,8 +133,8 @@ class ReconnectingPipeClient:
 | `retry_interval_ms` | `int` | `500` | 再接続試行間の待機時間（ms）|
 | `max_retries` | `int` | `0` | 最大再接続試行回数（`0` = 無限）|
 | `connect_timeout_ms` | `int` | `5000` | 個々の接続試行タイムアウト（ms、`0` = 無限待機）|
-| `on_reconnect` | `Callable[[], None] \| None` | `None` | 再接続成功後に呼ばれるコールバック |
-| `buffer_size` | `int` | `65536` | 内部バッファサイズ（`PipeClient` に委譲）|
+| `on_reconnect` | `Callable[[], None] \| None` | `None` | 再接続成功後に呼ばれるコールバック。`AsyncReconnectingPipeClient` では同期関数を渡す（コルーチン不可）|
+| `buffer_size` | `int` | `65536` | 内部バッファサイズ（`PipeClient` / `AsyncPipeClient` に委譲）|
 
 **引数検証**
 
@@ -104,7 +142,7 @@ class ReconnectingPipeClient:
 - `max_retries < 0` → `ValueError`
 - `connect_timeout_ms < 0` → `ValueError`
 
-### 3.2 メソッド一覧
+### 3.2 メソッド一覧（`ReconnectingPipeClient`）
 
 ```python
 def connect(self, timeout_ms: int = 0) -> None:
@@ -186,9 +224,75 @@ def retry_count(self) -> int:
     """インスタンス生成からの累計再接続成功回数。close() でリセットされない。"""
 ```
 
-**コンテキストマネージャ**
+**コンテキストマネージャ（同期版）**
 
 `__enter__` は `self` を返す。`__exit__` は例外有無を問わず `close()` を呼ぶ。
+
+---
+
+### 3.3 メソッド一覧（`AsyncReconnectingPipeClient`）
+
+`ReconnectingPipeClient` と同じプロパティ / パラメータ / 例外ルールを持つ。
+各 I/O メソッドがコルーチンになる点のみ異なる。
+
+```python
+async def connect(self, timeout_ms: int = 0) -> None:
+    """サーバーへ初回接続する（コルーチン）。
+
+    Raises
+    ------
+    PipeError
+        接続に失敗した場合。
+    NotConnectedError
+        close() 済みのインスタンスに対して呼んだ場合。
+    """
+
+async def send(self, msg: Message, timeout_ms: int = 0) -> None:
+    """フレーム化メッセージを送信する（コルーチン）。
+
+    切断を検知した場合は自動再接続後に同一メッセージを 1 回のみ再送信する。
+
+    Raises
+    ------
+    MaxRetriesExceededError
+        再接続試行がすべて失敗した場合。
+    NotConnectedError
+        close() 済みのインスタンスに対して呼んだ場合。
+    """
+
+async def receive(self, timeout_ms: int = 5000) -> Message:
+    """フレーム化メッセージを受信する（コルーチン）。
+
+    Raises
+    ------
+    MaxRetriesExceededError
+        再接続試行がすべて失敗した場合。
+    TimeoutError
+        timeout_ms 内にメッセージが届かなかった場合（再接続は行わない）。
+    NotConnectedError
+        close() 済みのインスタンスに対して呼んだ場合。
+    """
+
+async def close(self) -> None:
+    """接続を閉じ、以降の操作を無効化する（コルーチン / 冪等）。
+
+    AsyncPipeClient.close() を await する。ロックは取得しない（デッドロック防止）。
+    """
+
+@property
+def pipe_name(self) -> str: ...
+
+@property
+def is_connected(self) -> bool: ...
+
+@property
+def retry_count(self) -> int: ...
+```
+
+**非同期コンテキストマネージャ**
+
+`async with AsyncReconnectingPipeClient(...) as client:` で使用する。
+`__aenter__` は `self` を返す。`__aexit__` は `await self.close()` を呼ぶ。
 
 ### 3.3 例外クラス
 
@@ -217,6 +321,9 @@ class MaxRetriesExceededError(PipeError):
 ---
 
 ## 4. 再接続アルゴリズム
+
+§4.1〜§4.3 は `ReconnectingPipeClient`（同期版）の実装を示す。
+§4.4〜§4.6 は `AsyncReconnectingPipeClient`（非同期版）の実装を示す。
 
 ### 4.1 `send()` のフロー
 
@@ -304,7 +411,7 @@ def _reconnect_with_retry(self) -> None:
 - `on_reconnect` コールバックは GIL を保持したまま Lock 内で呼ぶ。
   コールバック内でブロッキング操作を行うと Lock を長時間保持するため、ユーザーが注意する必要がある
 
-### 4.4 `connect()` のフロー
+### 4.4 `connect()` のフロー（同期版）
 
 ```
 connect(timeout_ms)
@@ -319,7 +426,85 @@ connect(timeout_ms)
 
 ---
 
-## 5. スレッド安全性
+### 4.5 `AsyncReconnectingPipeClient._reconnect_with_retry()` の内部ロジック
+
+同期版の `_reconnect_with_retry()` と同一のアルゴリズムだが、次の点が異なる。
+
+| 同期版 | 非同期版 |
+|---|---|
+| `threading.Lock` | `asyncio.Lock`（`async with self._lock:`）|
+| `time.sleep(interval / 1000.0)` | `await asyncio.sleep(interval / 1000.0)` |
+| `self._impl.close()` | `await self._impl.close()` |
+| `self._impl.connect(timeout_sec)` | `await self._impl.connect(timeout_ms)` |
+
+```python
+async def _reconnect_with_retry(self) -> None:
+    """
+    asyncio.Lock 取得後に再接続を試みる。
+    別タスクが既に再接続を完了していた場合は何もせず返る。
+    """
+    async with self._lock:
+        # 二重再接続防止: 別タスクが先に再接続済みであればスキップ
+        if self._impl.is_connected:
+            return
+
+        attempts = 0
+        last_exc: Exception | None = None
+
+        while self._max_retries == 0 or attempts < self._max_retries:
+            attempts += 1
+            try:
+                await self._impl.close()
+                await asyncio.sleep(self._retry_interval_ms / 1000.0)
+                await self._impl.connect(self._connect_timeout_ms)
+                # 成功
+                self._retry_count += 1
+                if self._on_reconnect is not None:
+                    self._on_reconnect()   # 同期コールバック
+                return
+            except PipeError as e:
+                last_exc = e
+
+        raise MaxRetriesExceededError(
+            attempts=attempts,
+            last_exception=last_exc,  # type: ignore[arg-type]
+        )
+```
+
+**タイムアウト引数の違い**: `AsyncPipeClient.connect(timeout_ms: int)` はミリ秒単位（`aio.py` の実装に合わせる）。
+同期版 `PipeClient.connect(timeout: float)` は秒単位なので `/1000.0` 変換が必要。
+
+### 4.6 非同期版フロー（`send()` / `receive()`）
+
+```
+await send(msg, timeout_ms)
+│
+├─ _closed? → raise NotConnectedError
+├─ await _impl.send(msg)  ─── 成功 → return
+└─ ConnectionResetError / BrokenPipeError:
+     ├─ await _reconnect_with_retry()   # asyncio.Lock で保護
+     │     ├─ 成功 → await _impl.send(msg)  # 1 回のみ再試行
+     │     └─ MaxRetriesExceededError → 上位に伝播
+     └─ その他例外 → 上位に伝播
+
+await receive(timeout_ms)
+│
+├─ _closed? → raise NotConnectedError
+├─ await _impl.receive(timeout_ms)  ─── 成功 → return
+└─ ConnectionResetError / BrokenPipeError:
+     ├─ await _reconnect_with_retry()   # asyncio.Lock で保護
+     │     ├─ 成功 → await _impl.receive(timeout_ms)  # 再接続後に次メッセージ待機
+     │     └─ MaxRetriesExceededError → 上位に伝播
+     └─ その他例外 → 上位に伝播
+```
+
+`TimeoutError` は接続切断ではないため、`_reconnect_with_retry()` を呼ばずにそのまま送出する。
+
+---
+
+## 5. スレッド安全性 / タスク安全性
+
+### 5.1 同期版（`ReconnectingPipeClient`）
 
 | 操作 | 保護方式 | 理由 |
 |---|---|---|
@@ -328,7 +513,7 @@ connect(timeout_ms)
 | `_closed` フラグの読み書き | GIL 保護 | Python の `bool` 代入は GIL 保護下で原子的 |
 | `_retry_count` のインクリメント | `_lock` 内で実施 | `_reconnect_with_retry` の Lock 内でのみ更新 |
 
-**二重再接続防止の仕組み**
+**二重再接続防止の仕組み（同期版）**
 
 スレッド A・B が同時に `ConnectionResetError` を検知した場合:
 
@@ -336,6 +521,28 @@ connect(timeout_ms)
 2. B は `_lock` 待ちでブロック
 3. A の再接続が成功 → `is_connected` が `True` に変わる → `_lock` を解放
 4. B が `_lock` を取得 → `is_connected` が `True` → 処理をスキップして返る
+
+### 5.2 非同期版（`AsyncReconnectingPipeClient`）
+
+| 操作 | 保護方式 | 理由 |
+|---|---|---|
+| `_reconnect_with_retry()` | `asyncio.Lock` | 複数タスクの同時再接続を防ぐ |
+| `_impl` への I/O | `AsyncPipeClient` 内部排他 | `aio.py` の実装に依存 |
+| `_closed` フラグの読み書き | イベントループシングルスレッド | await しない判定は原子的 |
+| `_retry_count` のインクリメント | `_lock` 内で実施 | `_reconnect_with_retry` の Lock 内でのみ更新 |
+
+`asyncio.Lock` はスレッドセーフではない。
+複数のスレッドから同じ `AsyncReconnectingPipeClient` を共有することは禁止する。
+1 インスタンス = 1 イベントループの制約を守ること。
+
+**二重再接続防止の仕組み（非同期版）**
+
+タスク A・B が同時に `ConnectionResetError` を検知した場合:
+
+1. A が `asyncio.Lock` を取得（`async with`）→ `is_connected` が `False` → 再接続を開始
+2. B は `asyncio.Lock` で `await` → イベントループに制御を返す（ブロックしない）
+3. A の `await _impl.connect(...)` 完了 → `is_connected` が `True` → Lock 解放
+4. B が Lock を取得 → `is_connected` が `True` → スキップして返る
 
 ---
 
@@ -355,7 +562,7 @@ connect(timeout_ms)
 
 ## 7. 使用例
 
-### 7.1 基本使用
+### 7.1 基本使用（同期版）
 
 ```python
 import pipeutil
@@ -376,7 +583,31 @@ with client:
         print(resp.text)
 ```
 
-### 7.2 無限リトライ + ロギング
+### 7.2 基本使用（asyncio 版）
+
+```python
+import asyncio
+import pipeutil
+
+async def main() -> None:
+    client = pipeutil.AsyncReconnectingPipeClient(
+        "my_pipe",
+        retry_interval_ms=500,
+        max_retries=10,
+        on_reconnect=lambda: print("reconnected"),
+    )
+
+    async with client:
+        await client.connect()  # 初回接続
+        while True:
+            await client.send(pipeutil.Message(b"ping"))
+            resp = await client.receive(timeout_ms=5000)
+            print(resp.text)
+
+asyncio.run(main())
+```
+
+### 7.3 無限リトライ + ロギング
 
 ```python
 import logging
@@ -385,15 +616,24 @@ import pipeutil
 def on_reconnect() -> None:
     logging.warning("Reconnected to server")
 
+# 同期版
 client = pipeutil.ReconnectingPipeClient(
     "my_pipe",
     max_retries=0,          # 無限リトライ
     retry_interval_ms=1000,
     on_reconnect=on_reconnect,
 )
+
+# 非同期版
+async_client = pipeutil.AsyncReconnectingPipeClient(
+    "my_pipe",
+    max_retries=0,
+    retry_interval_ms=1000,
+    on_reconnect=on_reconnect,  # 同期コールバックを渡す
+)
 ```
 
-### 7.3 接続状態の確認
+### 7.4 接続状態の確認
 
 ```python
 client = pipeutil.ReconnectingPipeClient("my_pipe")
@@ -413,7 +653,8 @@ print(client.pipe_name)      # "my_pipe"
 ```
 python/pipeutil/reconnecting_client.py
   MaxRetriesExceededError(PipeError)
-  ReconnectingPipeClient
+
+  ReconnectingPipeClient                          ← 同期版
     __init__(pipe_name, *, retry_interval_ms, max_retries, connect_timeout_ms,
              on_reconnect, buffer_size)
     connect(timeout_ms) → None
@@ -425,22 +666,40 @@ python/pipeutil/reconnecting_client.py
     is_connected: bool        [property]
     retry_count: int          [property]
     _reconnect_with_retry()   [private]
+
+  AsyncReconnectingPipeClient                     ← 非同期版
+    __init__(pipe_name, *, retry_interval_ms, max_retries, connect_timeout_ms,
+             on_reconnect, buffer_size)
+    async connect(timeout_ms) → None
+    async send(msg, timeout_ms) → None
+    async receive(timeout_ms) → Message
+    async close() → None
+    __aenter__() / __aexit__()
+    pipe_name: str            [property]
+    is_connected: bool        [property]
+    retry_count: int          [property]
+    async _reconnect_with_retry()   [private]
 ```
 
-依存: `time`, `threading`, `._pipeutil.PipeError`, `._pipeutil.PipeClient`,
+依存（同期版）: `time`, `threading`, `._pipeutil.PipeError`, `._pipeutil.PipeClient`,
        `._pipeutil.Message`, `._pipeutil.ConnectionResetError`, `._pipeutil.BrokenPipeError`,
        `._pipeutil.NotConnectedError`
+
+依存（非同期版）: `asyncio`, `._pipeutil.PipeError`, `._pipeutil.Message`,
+       `._pipeutil.ConnectionResetError`, `._pipeutil.BrokenPipeError`,
+       `._pipeutil.NotConnectedError`, `.aio.AsyncPipeClient`
 
 ### 8.2 更新ファイル: `python/pipeutil/__init__.py`
 
 ```python
 from .reconnecting_client import (   # noqa: F401
     ReconnectingPipeClient,
+    AsyncReconnectingPipeClient,
     MaxRetriesExceededError,
 )
 ```
 
-`__all__` に `"ReconnectingPipeClient"`, `"MaxRetriesExceededError"` を追加。
+`__all__` に `"ReconnectingPipeClient"`, `"AsyncReconnectingPipeClient"`, `"MaxRetriesExceededError"` を追加。
 
 ### 8.3 更新ファイル: `python/pipeutil/__init__.pyi`
 
@@ -546,6 +805,94 @@ class ReconnectingPipeClient:
     def retry_count(self) -> int:
         """累計再接続成功回数（close() でリセットされない）。"""
         ...
+
+# ─── AsyncReconnectingPipeClient ────────────────────────────────────
+
+class AsyncReconnectingPipeClient:
+    """AsyncPipeClient の自動再接続ラッパー（asyncio コルーチン版）。
+
+    send / receive で ConnectionResetError / BrokenPipeError を受けると
+    自動的に再接続してからオペレーションを再試行する。
+
+    注意: 1インスタンス = 1イベントループ固定（AsyncPipeClient と同じ制約）。
+
+    ライフサイクル: ``__init__()`` → ``await connect()`` → ``await send()`` / ``await receive()`` → ``await close()``
+    """
+
+    def __init__(
+        self,
+        pipe_name: str,
+        *,
+        retry_interval_ms: int = 500,
+        max_retries: int = 0,
+        connect_timeout_ms: int = 5000,
+        on_reconnect: Callable[[], None] | None = None,
+        buffer_size: int = 65536,
+    ) -> None: ...
+
+    async def connect(self, timeout_ms: int = 0) -> None:
+        """サーバーへ初回接続する（コルーチン）。
+
+        Parameters
+        ----------
+        timeout_ms:
+            接続試行タイムアウト (ms)。0 = 無限待機。
+        """
+        ...
+
+    async def send(self, msg: Message, timeout_ms: int = 0) -> None:
+        """フレーム化メッセージを送信する（コルーチン）。切断時は自動再接続後に再送信する。
+
+        Raises
+        ------
+        MaxRetriesExceededError
+            再接続試行がすべて失敗した場合。
+        NotConnectedError
+            close() 済みのインスタンスに対して呼んだ場合。
+        """
+        ...
+
+    async def receive(self, timeout_ms: int = 5000) -> Message:
+        """フレーム化メッセージを受信する（コルーチン）。切断時は自動再接続後に次のメッセージを待機する。
+
+        Raises
+        ------
+        MaxRetriesExceededError
+            再接続試行がすべて失敗した場合。
+        TimeoutError
+            timeout_ms 内にメッセージが届かなかった場合。
+        NotConnectedError
+            close() 済みのインスタンスに対して呼んだ場合。
+        """
+        ...
+
+    async def close(self) -> None:
+        """接続を閉じ、以降の操作を無効化する（コルーチン / 冪等）。"""
+        ...
+
+    async def __aenter__(self) -> AsyncReconnectingPipeClient: ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+    @property
+    def pipe_name(self) -> str:
+        """接続先パイプ名。"""
+        ...
+
+    @property
+    def is_connected(self) -> bool:
+        """現在接続中なら True。"""
+        ...
+
+    @property
+    def retry_count(self) -> int:
+        """累計再接続成功回数（close() でリセットされない）。"""
+        ...
 ```
 
 ---
@@ -553,6 +900,8 @@ class ReconnectingPipeClient:
 ## 10. テスト設計
 
 テストファイル: `tests/python/test_reconnecting.py`
+
+### 10.1 同期版テスト（`ReconnectingPipeClient`）
 
 | # | テスト名 | 概要 |
 |---|---|---|
@@ -574,6 +923,22 @@ class ReconnectingPipeClient:
   1 回目の呼び出しで `ConnectionResetError` を送出 → 2 回目は正常動作させる
 - `PipeClient.connect` / `close` / `is_connected` もモック化する
 
+### 10.2 非同期版テスト（`AsyncReconnectingPipeClient`）
+
+| # | テスト名 | 概要 |
+|---|---|---|
+| T13 | `test_async_basic_send_receive` | 正常接続・非同期送受信ラウンドトリップが成功すること |
+| T14 | `test_async_context_manager` | `async with` ブロック脱出後に `close()` が呼ばれ `NotConnectedError` になること |
+| T15 | `test_async_reconnect_on_connection_reset` | `ConnectionResetError` 後に再接続して非同期送信成功すること |
+| T16 | `test_async_max_retries_exceeded` | 再接続失敗 N 回で `MaxRetriesExceededError` が送出されること |
+| T17 | `test_async_on_reconnect_callback` | 再接続成功後に同期コールバックが 1 回呼ばれること |
+| T18 | `test_async_retry_count_property` | `retry_count` が再接続成功ごとにインクリメントされること |
+| T19 | `test_async_close_prevents_reconnect` | `close()` 後の `send()` が `NotConnectedError`（再接続しない）こと |
+| T20 | `test_async_task_safe_reconnect` | 複数タスクが同時に切断を検知しても 1 回だけ再接続すること |
+
+非同期テストはすべて `pytest-asyncio` を使用し、`@pytest.mark.asyncio` デコレータを付与する。
+モック方法は同期版と同様。`AsyncPipeClient.send` / `receive` / `connect` / `close` / `is_connected` をモック化する。
+
 ---
 
 ## 11. 制約・注意事項
@@ -587,8 +952,9 @@ class ReconnectingPipeClient:
 3. **RPC 非対応**: `send_request()` は v0.3.0 では提供しない。
    RPC + 自動再接続が必要な場合は F-002 との統合として別途検討する。
 
-4. **asyncio 非対応**: asyncio 用途は `AsyncPipeClient`（F-004）を使用すること。
-   このクラスはブロッキング I/O 専用である。
+4. **`AsyncReconnectingPipeClient` の asyncio コールバック制約**: `on_reconnect` は同期コールバックのみ受け付ける。
+   コルーチン関数を渡してもそのまま呼ばれるだけで await されない（意図しない動作になる）。
+   asyncio 上での非同期コールバックが必要な場合は、`on_reconnect` から `asyncio.ensure_future()` を使用すること（ただし Lock 保持中のため注意）。
 
 5. **`on_reconnect` コールバックの注意**: コールバックは `_lock` 保持中に呼ばれる。
    コールバック内でこのクラスの `send()` / `receive()` を呼ぶとデッドロックする。
