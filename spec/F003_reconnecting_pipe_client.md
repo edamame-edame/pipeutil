@@ -40,7 +40,8 @@ while True:
 | 再接続成功コールバック（`on_reconnect`） | ✅ 必須 |
 | スレッドセーフ（同期版） | ✅ `threading.Lock` で保護 |
 | asyncio 統合（`AsyncReconnectingPipeClient`） | ✅ F-004 実装済みのため本 spec で対応 |
-| RPC（`send_request()`） 対応 | ❌ 対象外（v0.3.0 では提供しない） |
+| RPC `send_request()` の**接続再確立**（方針 A） | ✅ `ReconnectingRpcPipeClient` として提供 |
+| RPC `send_request()` の**自動再送** | ❌ 冪等性を保証できないため提供しない |
 
 ---
 
@@ -49,12 +50,13 @@ while True:
 ```
 python/pipeutil/
   reconnecting_client.py     ← 新規: ReconnectingPipeClient / AsyncReconnectingPipeClient
+                                        / ReconnectingRpcPipeClient
                                         / MaxRetriesExceededError
   __init__.py                ← 更新: re-export を追加
   __init__.pyi               ← 更新: 型スタブを追加
 
 tests/python/
-  test_reconnecting.py       ← 新規: 12 件（同期）+ 8 件（非同期）= 20 件
+  test_reconnecting.py       ← 新規: 12 件（同期）+ 8 件（非同期）+ 5 件（RPC）= 25 件
 ```
 
 ### 2.1 クラス関係
@@ -73,9 +75,16 @@ AsyncReconnectingPipeClient
   ├─ _lock: asyncio.Lock        ← 再接続クリティカルセクション保護
   ├─ _closed: bool              ← close() 後の操作ガード
   └─ _retry_count: int          ← 今セッション通算の再接続成功回数
+
+[RPC版（同期）]
+ReconnectingRpcPipeClient
+  ├─ _impl: RpcPipeClient       ← 実際の I/O・RPC・バックグラウンド受信スレッドを担当
+  ├─ _lock: threading.Lock      ← 再接続クリティカルセクション保護
+  ├─ _closed: bool              ← close() 後の操作ガード
+  └─ _retry_count: int          ← 今セッション通算の再接続成功回数
 ```
 
-`PipeClient` / `AsyncPipeClient` 以外の C 拡張型には依存しない。
+`PipeClient` / `AsyncPipeClient` / `RpcPipeClient` 以外の C 拡張型には依存しない。
 `_impl` は `__init__` 内で生成し、クラスのライフサイクルを通じて同一インスタンスを再利用する。
 
 `asyncio.Lock` はイベントループにバインドされるため、`AsyncReconnectingPipeClient` は
@@ -85,14 +94,16 @@ AsyncReconnectingPipeClient
 
 ## 3. API 設計
 
-本 spec では 2 つのクラスを定義する。
+本 spec では 3 つのクラスを定義する。
 
 | クラス | 用途 | I/O モデル |
 |---|---|---|
 | `ReconnectingPipeClient` | スレッドブロッキング用 | `PipeClient`（同期 I/O）|
 | `AsyncReconnectingPipeClient` | asyncio コルーチン用 | `AsyncPipeClient`（非同期 I/O）|
+| `ReconnectingRpcPipeClient` | RPC ブロッキング用 | `RpcPipeClient`（同期 I/O + バックグラインド受信スレッド）|
 
-両クラスはコンストラクタシグネチャ・プロパティ・例外クラスを共有する。
+`ReconnectingPipeClient` / `AsyncReconnectingPipeClient` はコンストラクタシグネチャ・プロパティ・例外クラスを共有する。
+`ReconnectingRpcPipeClient` も同じコンストラクタシグネチャを持つが、`send_request()` を追加する。
 
 ---
 
@@ -317,6 +328,73 @@ class MaxRetriesExceededError(PipeError):
 
 `MaxRetriesExceededError` は `pipeutil.PipeError` のサブクラスとして定義し、
 `from .reconnecting_client import MaxRetriesExceededError` で `pipeutil` 直下に公開する。
+
+---
+
+### 3.4 メソッド一覧（`ReconnectingRpcPipeClient`）
+
+`ReconnectingPipeClient` と同じコンストラクタ・プロパティ・`connect()` / `close()` / `__enter__` / `__exit__` を持つ。
+以下は差分（追加・変更されるメソッド）のみ示す。
+
+```python
+def send(self, msg: Message, timeout_ms: int = 0) -> None:
+    """通常フレームを送信する（message_id=0）。
+    切断を検知した場合は自動再接続後に同一メッセージを 1 回のみ再送信する。
+    """
+
+def receive(self, timeout_ms: int = 5000) -> Message:
+    """通常受信キューからメッセージを取り出す（message_id=0 のフレームのみ）。
+    切断を検知した場合は自動再接続後に次のメッセージを待機する。
+    """
+
+def send_request(self, msg: Message, timeout: float = 5.0) -> Message:
+    """RPC リクエストを送信し、対応するレスポンスを返す（方針 A: 再送なし）。
+
+    切断を検知した場合は _reconnect_with_retry() で接続を再確立する。
+    ただし in-flight のリクエストは再送しない。接続再確立後に
+    ConnectionResetError / BrokenPipeError を上位に伝播するので、
+    ユーザーが必要に応じて再呼び出しを判断する。
+
+    Parameters
+    ----------
+    msg:
+        送信するリクエストメッセージ。
+    timeout:
+        秒単位のタイムアウト（RpcPipeClient.send_request と同一単位）。0.0 = 無限待機。
+
+    Raises
+    ------
+    ConnectionResetError / BrokenPipeError
+        送信中または応答待機中に切断が発生し、再接続後も例外が伝播した場合。
+    MaxRetriesExceededError
+        再接続試行がすべて失敗した場合。
+    TimeoutError
+        timeout 内にレスポンスが届かなかった場合（再接続は行わない）。
+    NotConnectedError
+        close() 済みのインスタンスに対して呼んだ場合。
+    """
+```
+
+**`send_request()` のフロー（方針 A）**
+
+```
+send_request(msg, timeout)
+│
+├─ _closed? → raise NotConnectedError
+│
+├─ _impl.send_request(msg, timeout)  ─── 成功 → return
+│
+└─ ConnectionResetError / BrokenPipeError:
+     │
+     ├─ _reconnect_with_retry()   # _lock で保護
+     │     ├─ 成功 → ConnectionResetError / BrokenPipeError を上位に伝播
+     │     │         （再接続は完了したが in-flight 分は再送しない）
+     │     └─ MaxRetriesExceededError → 上位に伝播
+     │
+     └─ その他例外 → 上位に伝播
+```
+
+`TimeoutError` は接続切断ではないため `_reconnect_with_retry()` を呼ばずにそのまま送出する。
 
 ---
 
@@ -679,6 +757,20 @@ python/pipeutil/reconnecting_client.py
     is_connected: bool        [property]
     retry_count: int          [property]
     async _reconnect_with_retry()   [private]
+
+  ReconnectingRpcPipeClient                       ← RPC版（標準 + send_request)
+    __init__(pipe_name, *, retry_interval_ms, max_retries, connect_timeout_ms,
+             on_reconnect, buffer_size)
+    connect(timeout_ms) → None
+    send(msg, timeout_ms) → None
+    receive(timeout_ms) → Message
+    send_request(msg, timeout) → Message   [方針 A: 再送なし]
+    close() → None
+    __enter__() / __exit__()
+    pipe_name: str            [property]
+    is_connected: bool        [property]
+    retry_count: int          [property]
+    _reconnect_with_retry()   [private]
 ```
 
 依存（同期版）: `time`, `threading`, `._pipeutil.PipeError`, `._pipeutil.PipeClient`,
@@ -689,17 +781,22 @@ python/pipeutil/reconnecting_client.py
        `._pipeutil.ConnectionResetError`, `._pipeutil.BrokenPipeError`,
        `._pipeutil.NotConnectedError`, `.aio.AsyncPipeClient`
 
+依存（RPC版）: `time`, `threading`, `._pipeutil.PipeError`, `._pipeutil.RpcPipeClient`,
+       `._pipeutil.Message`, `._pipeutil.ConnectionResetError`, `._pipeutil.BrokenPipeError`,
+       `._pipeutil.NotConnectedError`
+
 ### 8.2 更新ファイル: `python/pipeutil/__init__.py`
 
 ```python
 from .reconnecting_client import (   # noqa: F401
     ReconnectingPipeClient,
     AsyncReconnectingPipeClient,
+    ReconnectingRpcPipeClient,
     MaxRetriesExceededError,
 )
 ```
 
-`__all__` に `"ReconnectingPipeClient"`, `"AsyncReconnectingPipeClient"`, `"MaxRetriesExceededError"` を追加。
+`__all__` に `"ReconnectingPipeClient"`, `"AsyncReconnectingPipeClient"`, `"ReconnectingRpcPipeClient"`, `"MaxRetriesExceededError"` を追加。
 
 ### 8.3 更新ファイル: `python/pipeutil/__init__.pyi`
 
@@ -807,7 +904,6 @@ class ReconnectingPipeClient:
         ...
 
 # ─── AsyncReconnectingPipeClient ────────────────────────────────────
-
 class AsyncReconnectingPipeClient:
     """AsyncPipeClient の自動再接続ラッパー（asyncio コルーチン版）。
 
@@ -893,6 +989,78 @@ class AsyncReconnectingPipeClient:
     def retry_count(self) -> int:
         """累計再接続成功回数（close() でリセットされない）。"""
         ...
+
+# ─── ReconnectingRpcPipeClient ────────────────────────────────────
+
+class ReconnectingRpcPipeClient:
+    """RpcPipeClient の自動再接続ラッパー。
+
+    切断を検知した場合に接続を再確立する。
+    send_request() は in-flight のリクエストを再送しない（方針 A）。
+
+    ライフサイクル: ``__init__()`` → ``connect()`` → ``send_request()`` / ``send()`` / ``receive()`` → ``close()``
+    """
+
+    def __init__(
+        self,
+        pipe_name: str,
+        *,
+        retry_interval_ms: int = 500,
+        max_retries: int = 0,
+        connect_timeout_ms: int = 5000,
+        on_reconnect: Callable[[], None] | None = None,
+        buffer_size: int = 65536,
+    ) -> None: ...
+
+    def connect(self, timeout_ms: int = 0) -> None:
+        """サーバーへ初回接続する。"""
+        ...
+
+    def send(self, msg: Message, timeout_ms: int = 0) -> None:
+        """通常フレームを送信する（message_id=0）。切断時は自動再接続後に再送信する。"""
+        ...
+
+    def receive(self, timeout_ms: int = 5000) -> Message:
+        """天常受信キューからメッセージを取り出す。切断時は自動再接続後に次のメッセージを待機する。"""
+        ...
+
+    def send_request(self, msg: Message, timeout: float = 5.0) -> Message:
+        """RPC リクエストを送信しレスポンスを返す。切断時は接続を再確立するが、in-flight のリクエストは再送しない（方針 A）。
+
+        Raises
+        ------
+        ConnectionResetError / BrokenPipeError
+            送信中または応答待機中に切断が発生した場合。再接続後も上位に伝播される。
+        MaxRetriesExceededError
+            再接続試行がすべて失敗した場合。
+        TimeoutError
+            timeout 内にレスポンスが届かなかった場合（再接続は行わない）。
+        NotConnectedError
+            close() 済みのインスタンスに対して呼んだ場合。
+        """
+        ...
+
+    def close(self) -> None:
+        """接続を閉じ、以降の操作を無効化する（冪等）。"""
+        ...
+
+    def __enter__(self) -> ReconnectingRpcPipeClient: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+    @property
+    def pipe_name(self) -> str: ...
+
+    @property
+    def is_connected(self) -> bool: ...
+
+    @property
+    def retry_count(self) -> int: ...
 ```
 
 ---
@@ -939,6 +1107,18 @@ class AsyncReconnectingPipeClient:
 非同期テストはすべて `pytest-asyncio` を使用し、`@pytest.mark.asyncio` デコレータを付与する。
 モック方法は同期版と同様。`AsyncPipeClient.send` / `receive` / `connect` / `close` / `is_connected` をモック化する。
 
+### 10.3 RPC 版テスト（`ReconnectingRpcPipeClient`）
+
+| # | テスト名 | 概要 |
+|---|---|---|
+| T21 | `test_rpc_basic_send_request` | 正常接続で `send_request()` が成功すること |
+| T22 | `test_rpc_reconnect_on_connection_reset` | 切断後に接続を再確立し、`ConnectionResetError` を上位に伝播すること |
+| T23 | `test_rpc_no_auto_resend` | 切断後に in-flight リクエストが自動再送されないこと（方針 A 検証） |
+| T24 | `test_rpc_timeout_not_retried` | `TimeoutError` では再接続しないこと |
+| T25 | `test_rpc_max_retries_exceeded` | 再接続失敗 N 回で `MaxRetriesExceededError` が送出されること |
+
+`RpcPipeClient.send_request` / `connect` / `close` / `is_connected` をモック化し、T22 では `send_request` が `ConnectionResetError` を送出 → 再接続後も同じ例外を上位に伝播することを確認する。 T23 では切断後に `_impl.send_request` の呼び出し回数が 1 回のみであること（再呼び出ししない）をアサートする。
+
 ---
 
 ## 11. 制約・注意事項
@@ -949,8 +1129,20 @@ class AsyncReconnectingPipeClient:
 2. **`receive()` のメッセージ消失**: パイプ切断時に受信途中だったメッセージは失われる。
    アプリケーション層での確認応答（ACK）が必要な場合、このクラスだけでは不十分。
 
-3. **RPC 非対応**: `send_request()` は v0.3.0 では提供しない。
-   RPC + 自動再接続が必要な場合は F-002 との統合として別途検討する。
+3. **`send_request()` は再送しない（方針 A）**: `ReconnectingRpcPipeClient` は切断を検知したとき
+   接続を再確立するが、in-flight の `send_request()` を自動再送しない。
+
+   **理由**: `RpcPipeClient` 内部の `receiver_loop()` が切断を検知すると
+   `notify_all_pending()` が走り、`pending_map_` 内の全 `promise` に例外を伝播してクリアされる。
+   この時点でリクエストがサーバーに届いたかどうかは不明であり、再送すると
+   サーバーが同じ処理を二重実行する可能性がある（`send_request()` に冪等性保証はない）。
+
+   **方針 A の動作**: 切断 → `_reconnect_with_retry()` で接続再確立 → `send_request()` の
+   `future.get()` から `ConnectionResetError` / `BrokenPipeError` が上位に伝播する。
+   ユーザーが再送の要否を判断し、必要なら明示的に `send_request()` を再呼び出しする。
+
+   **自動再送（方針 B）を提供しない理由**: `idempotent=True` でオプトインする設計も検討したが、
+   冪等性の保証責任をライブラリが引き取れないため本 spec では対象外とする。
 
 4. **`AsyncReconnectingPipeClient` の asyncio コールバック制約**: `on_reconnect` は同期コールバックのみ受け付ける。
    コルーチン関数を渡してもそのまま呼ばれるだけで await されない（意図しない動作になる）。
