@@ -1,0 +1,2 @@
+id,severity,category,file,line,issue,impact,basis,status
+R-056,Critical,Python-CAPI,source/python/py_async_module.cpp,251,"`PyAsyncPipeHandle_cancel()` の GIL 解放は `_WIN32` 分岐で限定され、Linux 側の Python C-API 呼び出し時に GIL を保持する実装へ修正済みであることを確認。","GIL 非保持での C-API 呼び出しによるクラッシュ/メモリ破壊リスクを解消。","`source/python/py_async_module.cpp` の `#ifdef _WIN32` 分岐で Windows のみ `Py_BEGIN_ALLOW_THREADS`、Linux 側は `self->pipe->cancel()` を GIL 保持で呼ぶ構造を確認。",Resolved

@@ -1,14 +1,14 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-10 21:19:26
-最新レビューCSV: review/20260310211926.csv
+最終更新: 2026-03-10 21:23:26
+最新レビューCSV: review/20260310212326.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 1
-- 今回再レビューでの新規指摘（Medium 以上）: 1 件（Critical 1）
-- 修正確認済み指摘数: 54（R-055 まで集約済み）
-- 今回対象: F-004 Phase 2 実装レビュー（直前コミット `7ad4f25` 差分）
+- 未修正指摘数（Medium 以上）: 0
+- 今回再レビューでの新規指摘（Medium 以上）: 0 件
+- 修正確認済み指摘数: 55（R-056 まで集約済み）
+- 今回対象: F-004 Phase 2 実装レビュー（直前コミット `310323c` 差分）
 
 ---
 
@@ -68,21 +68,13 @@
 - R-053（Platform-Contract / F-004p2）: native backend 有効化は import 成否だけでなく実装完成度（プラットフォーム）で明示的にゲートすること。
 - R-054（Python-CAPI / F-004p2）: C-API のメソッド呼び出しレシーバには必ず有効な `PyObject*` を渡し、null レシーバを禁止すること。
 - R-055（API-Contract / F-004p2）: `message_id` は `uint32_t` へ変換前に範囲検証し、ラップアラウンドを防ぐこと。
+- R-056（Python-CAPI / F-004p2）: `cancel()` の GIL 解放は実装分岐に合わせ、Python C-API を呼ぶ経路（Linux）では GIL を保持すること。
 
 ---
 
 ## 3. 未修正指摘（Medium 以上）
 
-### R-056 (Critical) Python-CAPI
-
-**指摘**: `PyAsyncPipeHandle_cancel()` が無条件で `Py_BEGIN_ALLOW_THREADS` して `self->pipe->cancel()` を呼ぶため、Linux 分岐で `cancel()` 内の Python C-API 呼び出しが GIL 非保持状態で実行される。
-→ `source/python/py_async_module.cpp` の `PyAsyncPipeHandle_cancel()` に `#ifdef _WIN32` 分岐を追加。Windows では従来通り `Py_BEGIN_ALLOW_THREADS` 内で `CancelIoEx()` を呼び、Linux では GIL を保持したまま `cancel()` を呼ぶよう修正しました。✅
-
-**影響**: GIL 非保持での C-API 呼び出しは未定義動作であり、クラッシュやメモリ破壊を引き起こす可能性がある。
-
-**根拠**: `source/python/py_async_pipe.cpp` Linux 実装の `AsyncPlatformPipe::cancel()` は `PyCapsule_GetPointer` / `PyObject_CallMethodObjArgs` / `Py_CLEAR` を実行する。一方、`source/python/py_async_module.cpp` の `PyAsyncPipeHandle_cancel()` はプラットフォーム分岐なく `Py_BEGIN_ALLOW_THREADS` で GIL を解放している。
-
-**対応状況**: 修正済み
+なし
 
 ---
 
