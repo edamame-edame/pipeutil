@@ -1,14 +1,14 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-10 21:23:26
-最新レビューCSV: review/20260310212326.csv
+最終更新: 2026-03-10 21:58:14
+最新レビューCSV: review/20260310215814.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 0
-- 今回再レビューでの新規指摘（Medium 以上）: 0 件
+- 未修正指摘数（Medium 以上）: 2
+- 今回再レビューでの新規指摘（Medium 以上）: 2 件
 - 修正確認済み指摘数: 55（R-056 まで集約済み）
-- 今回対象: F-004 Phase 2 実装レビュー（直前コミット `310323c` 差分）
+- 今回対象: F-003 詳細設計レビュー（`spec/F003_reconnecting_pipe_client.md`）
 
 ---
 
@@ -74,7 +74,19 @@
 
 ## 3. 未修正指摘（Medium 以上）
 
-なし
+- R-057（High / API-Contract / F-003）
+	**指摘**: `ReconnectingRpcPipeClient` の `send` / `receive` が `timeout_ms`（ミリ秒）引数を持つ仕様になっているが、既存 `RpcPipeClient` は `send(msg)`（タイムアウト引数なし）と `receive(timeout: float)`（秒単位）契約であり不整合。
+	→ `spec/F003_reconnecting_pipe_client.md` の全該当箇所（§3.2・§3.3・§3.4・§4.1・§4.2・§4.6・§7・§8.1・§9）において、`ReconnectingPipeClient.send(msg)` / `receive(timeout: float = 0.0)`、`AsyncReconnectingPipeClient.send(msg)`、`ReconnectingRpcPipeClient.send(msg)` / `receive(timeout: float = 0.0)` に修正しました。✅
+	**影響**: 仕様どおり実装すると `receive(timeout_ms)` を秒 API へそのまま渡す 1000 倍タイムアウトバグ、または不要引数を持つ互換性破壊 API を導入するリスクがある。
+	**根拠**: `python/pipeutil/__init__.pyi:169` と `python/pipeutil/__init__.pyi:172` で `RpcPipeClient` 契約（`send(msg)` / `receive(timeout: float)`）を確認。`spec/F003_reconnecting_pipe_client.md:340` `spec/F003_reconnecting_pipe_client.md:345` `spec/F003_reconnecting_pipe_client.md:852` `spec/F003_reconnecting_pipe_client.md:864` `spec/F003_reconnecting_pipe_client.md:1020` `spec/F003_reconnecting_pipe_client.md:1024` は `timeout_ms` 前提。
+	**対応状況**: 対応済み
+
+- R-058（Medium / Spec-Quality / F-003）
+	**指摘**: 型スタブ例の docstring に誤記（`天常受信キュー`）が残っている。
+	→ `spec/F003_reconnecting_pipe_client.md` §9 型スタブの `ReconnectingRpcPipeClient.receive` docstring を `天常受信キュー` → `通常受信キュー` に修正しました。✅
+	**影響**: 仕様から実装コメントやユーザー向けドキュメントへ転記された際に、意味誤解と可読性低下を招く。
+	**根拠**: `spec/F003_reconnecting_pipe_client.md:1024` の `ReconnectingRpcPipeClient.receive` docstring を確認。
+	**対応状況**: 対応済み
 
 ---
 

@@ -173,16 +173,11 @@ def connect(self, timeout_ms: int = 0) -> None:
         close() 済みのインスタンスに対して呼んだ場合。
     """
 
-def send(self, msg: Message, timeout_ms: int = 0) -> None:
+def send(self, msg: Message) -> None:
     """フレーム化メッセージを送信する。
 
     切断を検知した場合は自動再接続後に同一メッセージを 1 回のみ再送信する
     （at-most-once セマンティクス）。再送後の送信失敗は再試行しない。
-
-    Parameters
-    ----------
-    timeout_ms:
-        送信タイムアウト (ms)。0 = 無限待機。
 
     Raises
     ------
@@ -194,7 +189,7 @@ def send(self, msg: Message, timeout_ms: int = 0) -> None:
         再接続後の送信が失敗した場合など、その他のパイプエラー。
     """
 
-def receive(self, timeout_ms: int = 5000) -> Message:
+def receive(self, timeout: float = 0.0) -> Message:
     """フレーム化メッセージを受信する。
 
     切断を検知した場合は自動再接続後に次のメッセージを待機する。
@@ -202,15 +197,15 @@ def receive(self, timeout_ms: int = 5000) -> Message:
 
     Parameters
     ----------
-    timeout_ms:
-        受信タイムアウト (ms)。0 = 無限待機。
+    timeout:
+        受信タイムアウト (秒)。0.0 = 無限待機。
 
     Raises
     ------
     MaxRetriesExceededError
         再接続試行がすべて失敗した場合。
     TimeoutError
-        timeout_ms 内にメッセージが届かなかった場合（再接続は行わない）。
+        timeout 秒以内にメッセージが届かなかった場合（再接続は行わない）。
     NotConnectedError
         close() 済みのインスタンスに対して呼んだ場合。
     """
@@ -258,7 +253,7 @@ async def connect(self, timeout_ms: int = 0) -> None:
         close() 済みのインスタンスに対して呼んだ場合。
     """
 
-async def send(self, msg: Message, timeout_ms: int = 0) -> None:
+async def send(self, msg: Message) -> None:
     """フレーム化メッセージを送信する（コルーチン）。
 
     切断を検知した場合は自動再接続後に同一メッセージを 1 回のみ再送信する。
@@ -337,14 +332,15 @@ class MaxRetriesExceededError(PipeError):
 以下は差分（追加・変更されるメソッド）のみ示す。
 
 ```python
-def send(self, msg: Message, timeout_ms: int = 0) -> None:
+def send(self, msg: Message) -> None:
     """通常フレームを送信する（message_id=0）。
     切断を検知した場合は自動再接続後に同一メッセージを 1 回のみ再送信する。
     """
 
-def receive(self, timeout_ms: int = 5000) -> Message:
+def receive(self, timeout: float = 0.0) -> Message:
     """通常受信キューからメッセージを取り出す（message_id=0 のフレームのみ）。
     切断を検知した場合は自動再接続後に次のメッセージを待機する。
+    timeout は秒単位（RpcPipeClient.receive と同一単位）。0.0 = 無限待機。
     """
 
 def send_request(self, msg: Message, timeout: float = 5.0) -> Message:
@@ -406,16 +402,16 @@ send_request(msg, timeout)
 ### 4.1 `send()` のフロー
 
 ```
-send(msg, timeout_ms)
+send(msg)
 │
 ├─ _closed? → raise NotConnectedError
 │
-├─ _impl.send(msg, timeout_ms)  ─── 成功 → return
+├─ _impl.send(msg)  ─── 成功 → return
 │
 └─ ConnectionResetError / BrokenPipeError:
      │
      ├─ _reconnect_with_retry()          # _lock で保護
-     │     ├─ 成功 → _impl.send(msg, timeout_ms)  # 1 回のみ再試行
+     │     ├─ 成功 → _impl.send(msg)  # 1 回のみ再試行
      │     │         成功 → return
      │     │         失敗 → 例外を上位に伝播（再帰的再接続は行わない）
      │     └─ MaxRetriesExceededError → 上位に伝播
@@ -426,16 +422,16 @@ send(msg, timeout_ms)
 ### 4.2 `receive()` のフロー
 
 ```
-receive(timeout_ms)
+receive(timeout)
 │
 ├─ _closed? → raise NotConnectedError
 │
-├─ _impl.receive(timeout_ms)  ─── 成功 → return
+├─ _impl.receive(timeout)  ─── 成功 → return
 │
 └─ ConnectionResetError / BrokenPipeError:
      │
      ├─ _reconnect_with_retry()          # _lock で保護
-     │     ├─ 成功 → _impl.receive(timeout_ms)  # 再接続後に次のメッセージを待機
+     │     ├─ 成功 → _impl.receive(timeout)  # 再接続後に次のメッセージを待機
      │     └─ MaxRetriesExceededError → 上位に伝播
      │
      └─ その他例外 → 上位に伝播
@@ -555,7 +551,7 @@ async def _reconnect_with_retry(self) -> None:
 ### 4.6 非同期版フロー（`send()` / `receive()`）
 
 ```
-await send(msg, timeout_ms)
+await send(msg)
 │
 ├─ _closed? → raise NotConnectedError
 ├─ await _impl.send(msg)  ─── 成功 → return
@@ -653,11 +649,11 @@ client = pipeutil.ReconnectingPipeClient(
 )
 
 with client:
-    client.connect()  # 初回接続（timeout_ms=0 でサーバー起動を待つ）
+    client.connect()  # 初回接続（connect_timeout_ms=0 でサーバー起動を待つ）
     while True:
         # サーバーが再起動しても自動復旧
         client.send(pipeutil.Message(b"ping"))
-        resp = client.receive(timeout_ms=5000)
+        resp = client.receive(timeout=5.0)
         print(resp.text)
 ```
 
@@ -749,7 +745,7 @@ python/pipeutil/reconnecting_client.py
     __init__(pipe_name, *, retry_interval_ms, max_retries, connect_timeout_ms,
              on_reconnect, buffer_size)
     async connect(timeout_ms) → None
-    async send(msg, timeout_ms) → None
+    async send(msg) → None
     async receive(timeout_ms) → Message
     async close() → None
     __aenter__() / __aexit__()
@@ -762,8 +758,8 @@ python/pipeutil/reconnecting_client.py
     __init__(pipe_name, *, retry_interval_ms, max_retries, connect_timeout_ms,
              on_reconnect, buffer_size)
     connect(timeout_ms) → None
-    send(msg, timeout_ms) → None
-    receive(timeout_ms) → Message
+    send(msg) → None
+    receive(timeout) → Message
     send_request(msg, timeout) → Message   [方針 A: 再送なし]
     close() → None
     __enter__() / __exit__()
@@ -849,7 +845,7 @@ class ReconnectingPipeClient:
         """
         ...
 
-    def send(self, msg: Message, timeout_ms: int = 0) -> None:
+    def send(self, msg: Message) -> None:
         """フレーム化メッセージを送信する。切断時は自動再接続後に再送信する。
 
         Raises
@@ -861,7 +857,7 @@ class ReconnectingPipeClient:
         """
         ...
 
-    def receive(self, timeout_ms: int = 5000) -> Message:
+    def receive(self, timeout: float = 0.0) -> Message:
         """フレーム化メッセージを受信する。切断時は自動再接続後に次のメッセージを待機する。
 
         Raises
@@ -869,7 +865,7 @@ class ReconnectingPipeClient:
         MaxRetriesExceededError
             再接続試行がすべて失敗した場合。
         TimeoutError
-            timeout_ms 内にメッセージが届かなかった場合。
+            timeout 秒以内にメッセージが届かなかった場合。
         NotConnectedError
             close() 済みのインスタンスに対して呼んだ場合。
         """
@@ -1016,12 +1012,12 @@ class ReconnectingRpcPipeClient:
         """サーバーへ初回接続する。"""
         ...
 
-    def send(self, msg: Message, timeout_ms: int = 0) -> None:
+    def send(self, msg: Message) -> None:
         """通常フレームを送信する（message_id=0）。切断時は自動再接続後に再送信する。"""
         ...
 
-    def receive(self, timeout_ms: int = 5000) -> Message:
-        """天常受信キューからメッセージを取り出す。切断時は自動再接続後に次のメッセージを待機する。"""
+    def receive(self, timeout: float = 0.0) -> Message:
+        """通常受信キューからメッセージを取り出す。切断時は自動再接続後に次のメッセージを待機する。"""
         ...
 
     def send_request(self, msg: Message, timeout: float = 5.0) -> Message:
