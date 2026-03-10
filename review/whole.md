@@ -1,13 +1,13 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-11 07:00:42
-最新レビューCSV: review/20260311070042.csv
+最終更新: 2026-03-11 07:09:09
+最新レビューCSV: review/20260311070909.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 2
-- 今回再レビューでの新規指摘（Medium 以上）: 2 件
-- 修正確認済み指摘数: 59（R-060 まで集約済み）
+- 未修正指摘数（Medium 以上）: 1
+- 今回再レビューでの新規指摘（Medium 以上）: 1 件
+- 修正確認済み指摘数: 61（R-062 まで集約済み）
 - 今回対象: F-006 詳細設計レビュー（`spec/F006_diagnostics_metrics.md`）
 
 ---
@@ -73,24 +73,18 @@
 - R-058（Spec-Quality / F-003）: 型スタブ例の誤記（`天常受信キュー`）は `通常受信キュー` に修正すること。
 - R-059（API-Contract / F-003）: `AsyncReconnectingPipeClient.send` は `AsyncPipeClient` 契約どおり `send(msg)` とすること。
 - R-060（Spec-Consistency / F-003）: §8.1 の `ReconnectingPipeClient` シグネチャ記述を本文 API と一致させること。
+- R-061（Metrics-Contract / F-006）: `active_connections_` 前提の擬似コードを撤回し、`detach()` 運用と整合する累積統計バッファ方式へ更新したこと（ただし契約再整備は R-063 で継続）。
+- R-062（Spec-Consistency / F-006）: `errors` カウントを `catch (const PipeException&)` に統一し、制約章の定義と一致させたこと。
 
 ---
 
 ## 3. 未修正指摘（Medium 以上）
 
-- R-061 (High, Metrics-Contract)
-	**指摘**: `MultiPipeServer::stats()` の擬似コードが `active_connections_` のみを合算しており、接続終了済みセッションの統計が失われる設計になっている。さらに現行実装には `active_connections_` コンテナ自体が存在せず、仕様どおり実装できない。
-	**影響**: 長時間稼働時に `messages_sent/bytes_sent` が接続終了のたびに見えなくなり、監視値が実トラフィックを過小表示する。実装時に仕様と既存構造が衝突し、設計再作業が発生する。
-	**根拠**: `spec/F006_diagnostics_metrics.md:33` は `全接続合算` を必須化している一方、`spec/F006_diagnostics_metrics.md:327-335` は `active_connections_` のみを走査。現行 `source/core/src/multi_pipe_server.cpp:109,133,158` は `active_count_` と detach 運用で、接続オブジェクトを保持する `active_connections_` は存在しない。
+- R-063 (High, Metrics-Contract)
+	**指摘**: `MultiPipeServer::stats()` 契約が「全接続合算」から「終了済みセッションのみ」へ変質しており、`reset_stats()` も累積バッファしかクリアしないためアクティブセッション分をリセットできない。
+	**影響**: 稼働中セッションの送受信が監視値に即時反映されず恒常的に過小表示となる。さらに `reset_stats()` 後にアクティブセッションが終了すると旧トラフィックが後追い加算され、区間計測が破綻する。
+	**根拠**: `spec/F006_diagnostics_metrics.md:33` は `全接続合算` を必須とする一方、`spec/F006_diagnostics_metrics.md:95,354-362,368-371,786-790` はアクティブセッション非反映と `reset_stats()` の非作用を明記。既存 `source/core/src/multi_pipe_server.cpp:109-154` は `active_count_` + detach 運用で、契約整合の再定義が必要。
 	**対応状況**: Open
-	→ `spec/F006_diagnostics_metrics.md` の §2.1 原則#6 / §4.3 擬似コード / §10.1 TC12 / §11.6 を修正。`MultiPipeServer::Impl` に `mutable std::mutex accumulated_mutex_` + `PipeStats accumulated_stats_{}` を追加し、`SlotGuard` デストラクタ内で `impl_.accumulated_stats_ += conn_.stats()` を実行する設計に変更。`stats()` は `accumulated_stats_` のスナップショットを返す。アクティブセッションの統計はセッション終了後に反映される旨を注記。✅
-
-- R-062 (Medium, Spec-Consistency)
-	**指摘**: `errors` カウント方針が本文内で矛盾している。実装例では `catch (...)` で全例外をカウントしているが、制約章では `PipeException` のみカウントすると定義している。
-	**影響**: 実装者によって `std::bad_alloc` など非 `PipeException` を含める/含めない挙動が分岐し、メトリクス互換性が崩れる。
-	**根拠**: `spec/F006_diagnostics_metrics.md:246,306` のコード例は `catch (...)` で `stat_errors_` を加算。`spec/F006_diagnostics_metrics.md:740-742` は `PipeException` のみカウントと明記。
-	**対応状況**: Open
-	→ `spec/F006_diagnostics_metrics.md` の §4.1 / §4.2 のコード例内 `catch (...)` を `catch (const PipeException&)` に修正し、§11.4 の方針（`PipeException` のみカウント）と一致させた。✅
 
 ---
 
