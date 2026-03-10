@@ -732,8 +732,8 @@ python/pipeutil/reconnecting_client.py
     __init__(pipe_name, *, retry_interval_ms, max_retries, connect_timeout_ms,
              on_reconnect, buffer_size)
     connect(timeout_ms) → None
-    send(msg, timeout_ms) → None
-    receive(timeout_ms) → Message
+    send(msg) → None
+    receive(timeout) → Message
     close() → None
     __enter__() / __exit__()
     pipe_name: str            [property]
@@ -932,7 +932,7 @@ class AsyncReconnectingPipeClient:
         """
         ...
 
-    async def send(self, msg: Message, timeout_ms: int = 0) -> None:
+    async def send(self, msg: Message) -> None:
         """フレーム化メッセージを送信する（コルーチン）。切断時は自動再接続後に再送信する。
 
         Raises
