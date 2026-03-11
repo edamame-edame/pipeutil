@@ -360,7 +360,7 @@ struct SessionStats {
 struct MultiPipeServer::Impl {
     // ... 既存フィールド (active_count_, done_cv_, 等) ...
 
-    // 統一メトリクスムテックス： accumulated_stats_ と active_stats_ を一丁化して保護
+    // 統一メトリクスムテックス： accumulated_stats_ と active_stats_ を一体化して保護
     // SlotGuard::~SlotGuard() ・ stats() ・ reset_stats() が共にこれを使用する
     mutable std::mutex                          stats_mutex_;
     PipeStats                                   accumulated_stats_{};
@@ -414,7 +414,7 @@ void MultiPipeServer::reset_stats() noexcept {
 
 > **単一ロックのトレードオフ**: `stats()` はアクティブセッションが多い場合に `O(n)` のリスト走査を伴う（`n` = アクティブ接続数）。
 > 最大 64 接続の制約下では診断用途として十分高速であり、ロック保持時間は微小。
-> ホットパスでの頻繁な呼び出しは避り、定期ポーリング（例: 1 秒間隔）で利用すること。
+> ホットパスでの頻繁な呼び出しは避け、定期ポーリング（例: 1 秒間隔）で利用すること。
 
 ---
 

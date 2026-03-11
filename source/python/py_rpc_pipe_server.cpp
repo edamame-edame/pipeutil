@@ -11,6 +11,7 @@
 #include "py_rpc_pipe_server.hpp"
 #include "py_exceptions.hpp"
 #include "py_message.hpp"
+#include "py_pipe_stats.hpp"
 #include <chrono>
 #include <atomic>
 
@@ -325,6 +326,19 @@ static PyObject* PyRpcPipeServer_pipe_name(PyRpcPipeServer* self, PyObject*) {
     return PyUnicode_FromString(self->server->pipe_name().c_str());
 }
 
+// ─── 診断・メトリクス (F-006) ─────────────────────────────────
+
+static PyObject* PyRpcPipeServer_stats(PyRpcPipeServer* self, PyObject*) {
+    if (!check_server(self)) return nullptr;
+    return PyPipeStats_from_stats(self->server->stats());
+}
+
+static PyObject* PyRpcPipeServer_reset_stats(PyRpcPipeServer* self, PyObject*) {
+    if (!check_server(self)) return nullptr;
+    self->server->reset_stats();
+    Py_RETURN_NONE;
+}
+
 // ─── メソッドテーブル ─────────────────────────────────────────────────────
 
 static PyMethodDef PyRpcPipeServer_methods[] = {
@@ -351,6 +365,10 @@ static PyMethodDef PyRpcPipeServer_methods[] = {
      METH_NOARGS, "is_serving() -> bool"},
     {"pipe_name",          reinterpret_cast<PyCFunction>(PyRpcPipeServer_pipe_name),
      METH_NOARGS, "pipe_name() -> str"},
+    {"stats",              reinterpret_cast<PyCFunction>(PyRpcPipeServer_stats),
+     METH_NOARGS, "stats() -> PipeStats\nReturn a diagnostics snapshot."},
+    {"reset_stats",        reinterpret_cast<PyCFunction>(PyRpcPipeServer_reset_stats),
+     METH_NOARGS, "reset_stats() -> None\nReset all counters to 0."},
     {nullptr}
 };
 

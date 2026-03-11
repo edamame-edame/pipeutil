@@ -3,6 +3,7 @@
 
 #include "pipeutil_export.hpp"
 #include "message.hpp"
+#include "pipe_stats.hpp"
 #include <chrono>
 #include <memory>
 #include <string>
@@ -57,6 +58,13 @@ public:
 
     [[nodiscard]] bool               is_connected() const noexcept;
     [[nodiscard]] const std::string& pipe_name()    const noexcept;
+
+    // ─── 診断・メトリクス (F-006) ─────────────────────────────────────
+
+    /// カウンタのスナップショットを返す（noexcept）
+    [[nodiscard]] PipeStats stats() const noexcept;
+    /// 全カウンタを 0 にリセットする（noexcept）
+    void reset_stats() noexcept;
 
 private:
     class Impl;

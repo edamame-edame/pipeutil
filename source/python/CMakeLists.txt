@@ -6,6 +6,7 @@ set(PYTHON_EXT_SOURCES
     py_multi_pipe_server.cpp
     py_rpc_pipe_client.cpp
     py_rpc_pipe_server.cpp
+    py_pipe_stats.cpp
     py_message.cpp
     py_exceptions.cpp
 )

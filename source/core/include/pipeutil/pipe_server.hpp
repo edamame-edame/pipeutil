@@ -3,12 +3,13 @@
 
 #include "pipeutil_export.hpp"
 #include "message.hpp"
+#include "pipe_stats.hpp"
 #include <chrono>
 #include <memory>
 #include <string>
 
 namespace pipeutil {
-namespace detail { class IPlatformPipe; }  // 前方宣言（内部コンストラクタで参照）
+namespace detail { class IPlatformPipe; struct SessionStats; }  // 前方宣言
 
 // ──────────────────────────────────────────────────────────────────────────────
 // PipeServer — サーバー側: listen → accept → send/receive → close の順で使用
@@ -68,6 +69,11 @@ public:
     [[nodiscard]] bool               is_connected() const noexcept;
     [[nodiscard]] const std::string& pipe_name()    const noexcept;
 
+    // ─── 診断・メトリクス (F-006) ─────────────────────────────────────
+
+    [[nodiscard]] PipeStats stats() const noexcept;
+    void reset_stats() noexcept;
+
 private:
     // pimpl イディオム: プラットフォーム依存実装を .cpp に隠蔽
     class Impl;
@@ -82,6 +88,13 @@ private:
                std::string pipe_name,
                std::size_t buffer_size,
                std::unique_ptr<detail::IPlatformPipe> accepted);
+
+    /// MultiPipeServer 専用（SessionStats 付き）: accept 済み接続にセッション統計バッファを紐付ける
+    PipeServer(FromAcceptedTag,
+               std::string pipe_name,
+               std::size_t buffer_size,
+               std::unique_ptr<detail::IPlatformPipe> accepted,
+               std::shared_ptr<detail::SessionStats> session);
 };
 
 } // namespace pipeutil

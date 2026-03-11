@@ -9,6 +9,7 @@
 #include "py_multi_pipe_server.hpp"
 #include "py_pipe_server.hpp"       // PyPipeServer / PyPipeServer_Type
 #include "py_exceptions.hpp"
+#include "py_pipe_stats.hpp"
 #include <stdexcept>
 
 namespace pyutil {
@@ -173,6 +174,18 @@ static PyObject* PyMultiPipeServer_exit(PyMultiPipeServer* self, PyObject* /*arg
     return PyMultiPipeServer_stop(self, nullptr);
 }
 
+// ─── 診断・メトリクス (F-006) ─────────────────────────────────
+
+static PyObject* PyMultiPipeServer_stats(PyMultiPipeServer* self, PyObject* /*args*/) {
+    if (!self->server) return PyPipeStats_from_stats(pipeutil::PipeStats{});
+    return PyPipeStats_from_stats(self->server->stats());
+}
+
+static PyObject* PyMultiPipeServer_reset_stats(PyMultiPipeServer* self, PyObject* /*args*/) {
+    if (self->server) self->server->reset_stats();
+    Py_RETURN_NONE;
+}
+
 // ─── プロパティ ───────────────────────────────────────────────────────────
 
 static PyObject* PyMultiPipeServer_get_is_serving(PyMultiPipeServer* self, void*) {
@@ -221,6 +234,10 @@ static PyMethodDef PyMultiPipeServer_methods[] = {
      METH_NOARGS, "Context manager entry."},
     {"__exit__",  reinterpret_cast<PyCFunction>(PyMultiPipeServer_exit),
      METH_VARARGS, "Context manager exit (calls stop)."},
+    {"stats",       reinterpret_cast<PyCFunction>(PyMultiPipeServer_stats),
+     METH_NOARGS, "stats() -> PipeStats\nReturn aggregated diagnostics snapshot."},
+    {"reset_stats", reinterpret_cast<PyCFunction>(PyMultiPipeServer_reset_stats),
+     METH_NOARGS, "reset_stats() -> None\nReset all session counters to 0."},
     {nullptr, nullptr, 0, nullptr}
 };
 

@@ -4,6 +4,7 @@
 
 #include "pipeutil_export.hpp"
 #include "pipe_server.hpp"
+#include "pipe_stats.hpp"
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -65,6 +66,13 @@ public:
     [[nodiscard]] bool        is_serving()         const noexcept;
     [[nodiscard]] std::size_t active_connections() const noexcept;
     [[nodiscard]] const std::string& pipe_name()  const noexcept;
+
+    // ─── 診断・メトリクス (F-006) ─────────────────────────────────────
+
+    /// 全接続分を合算したスナップショットを返す（noexcept）
+    [[nodiscard]] PipeStats stats() const noexcept;
+    /// アクティブ・終了済み全接続の stats を 0 にリセットする（noexcept）
+    void reset_stats() noexcept;
 
 private:
     class Impl;

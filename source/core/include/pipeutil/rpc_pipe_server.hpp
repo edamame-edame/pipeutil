@@ -4,6 +4,7 @@
 
 #include "pipeutil_export.hpp"
 #include "message.hpp"
+#include "pipe_stats.hpp"
 
 #include <chrono>
 #include <functional>
@@ -73,6 +74,11 @@ public:
     [[nodiscard]] bool               is_connected()  const noexcept;
     [[nodiscard]] bool               is_serving()    const noexcept;
     [[nodiscard]] const std::string& pipe_name()     const noexcept;
+
+    // ─── 診断・メトリクス (F-006) ─────────────────────────────────────
+
+    [[nodiscard]] PipeStats stats() const noexcept;
+    void reset_stats() noexcept;
 
 private:
     class Impl;

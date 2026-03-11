@@ -27,6 +27,58 @@ class Message:
     def __bool__(self) -> bool: ...
     def __repr__(self) -> str: ...
 
+# ─── PipeStats ────────────────────────────────────────────────────────
+
+class PipeStats:
+    """診断・メトリクス情報のスナップショット。stats() が返す読み取り専用オブジェクト。"""
+
+    @property
+    def messages_sent(self) -> int:
+        """送信に成功したメッセージ数。"""
+        ...
+
+    @property
+    def messages_received(self) -> int:
+        """受信に成功したメッセージ数。"""
+        ...
+
+    @property
+    def bytes_sent(self) -> int:
+        """送信したペイロードの総バイト数（フレームヘッダ除く）。"""
+        ...
+
+    @property
+    def bytes_received(self) -> int:
+        """受信したペイロードの総バイト数（フレームヘッダ除く）。"""
+        ...
+
+    @property
+    def errors(self) -> int:
+        """送受信中に発生した PipeError の総数。"""
+        ...
+
+    @property
+    def rpc_calls(self) -> int:
+        """send_request() が正常完了した回数（PipeClient / PipeServer では常に 0）。"""
+        ...
+
+    @property
+    def rtt_total_ns(self) -> int:
+        """send_request() のラウンドトリップ合計時間（ナノ秒）。"""
+        ...
+
+    @property
+    def rtt_last_ns(self) -> int:
+        """最後の send_request() のラウンドトリップ時間（ナノ秒）。"""
+        ...
+
+    @property
+    def avg_round_trip_ns(self) -> int:
+        """send_request() のラウンドトリップ平均（ナノ秒）。rpc_calls == 0 なら 0。"""
+        ...
+
+    def __repr__(self) -> str: ...
+
 # ─── PipeServer ───────────────────────────────────────────────────────
 
 class PipeServer:
@@ -97,6 +149,14 @@ class PipeServer:
         """設定したパイプ識別名。"""
         ...
 
+    def stats(self) -> PipeStats:
+        """計測スナップショットを返す（ロックなし）。"""
+        ...
+
+    def reset_stats(self) -> None:
+        """全カウンタを 0 にリセットする（ロックなし）。"""
+        ...
+
 # ─── PipeClient ───────────────────────────────────────────────────────
 
 class PipeClient:
@@ -150,6 +210,14 @@ class PipeClient:
     @property
     def pipe_name(self) -> str:
         """設定したパイプ識別名。"""
+        ...
+
+    def stats(self) -> PipeStats:
+        """計測スナップショットを返す（ロックなし）。"""
+        ...
+
+    def reset_stats(self) -> None:
+        """全カウンタを 0 にリセットする（ロックなし）。"""
         ...
 
 # ─── RpcPipeClient ───────────────────────────────────────────────────
@@ -206,7 +274,13 @@ class RpcPipeClient:
     def pipe_name(self) -> str:
         """設定したパイプ識別名。"""
         ...
+    def stats(self) -> PipeStats:
+        """計測スナップショットを返す（ロックなし）。"""
+        ...
 
+    def reset_stats(self) -> None:
+        """全カウンタを 0 にリセットする（ロックなし）。"""
+        ...
 
 # ─── RpcPipeServer ───────────────────────────────────────────────────
 
@@ -249,6 +323,72 @@ class RpcPipeServer:
     def is_connected(self) -> bool: ...
     def is_serving(self) -> bool: ...
     def pipe_name(self) -> str: ...
+
+    def stats(self) -> PipeStats:
+        """計測スナップショットを返す（ロックなし）。"""
+        ...
+
+    def reset_stats(self) -> None:
+        """全カウンタを 0 にリセットする（ロックなし）。"""
+        ...
+
+
+# ─── MultiPipeServer ─────────────────────────────────────────────────
+
+from collections.abc import Callable as _Callable
+
+class MultiPipeServer:
+    """複数クライアント対応パイプサーバー。
+
+    ライフサイクル: ``serve(handler)`` を別スレッドで実行 → ``stop()``
+    """
+
+    def __init__(
+        self,
+        pipe_name: str,
+        max_connections: int = 8,
+        buffer_size: int = 65536,
+    ) -> None: ...
+
+    def serve(self, handler: _Callable[[PipeServer], None]) -> None:
+        """接続受付ループを開始する（ブロッキング）。stop() で終了。"""
+        ...
+
+    def stop(self) -> None:
+        """サーバーを停止し、全ハンドラスレッドの完了を待つ。"""
+        ...
+
+    def __enter__(self) -> MultiPipeServer: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+    @property
+    def is_serving(self) -> bool:
+        """``serve()`` 実行中なら ``True``。"""
+        ...
+
+    @property
+    def active_connections(self) -> int:
+        """現在稼働中のハンドラスレッド数。"""
+        ...
+
+    @property
+    def pipe_name(self) -> str:
+        """設定したパイプ識別名。"""
+        ...
+
+    def stats(self) -> PipeStats:
+        """全接続の stats を合算したスナップショットを返す（ロック使用）。"""
+        ...
+
+    def reset_stats(self) -> None:
+        """全接続の stats を一斉リセットする（ロック使用）。"""
+        ...
 
 
 # ─── 例外階層 ─────────────────────────────────────────────────────────

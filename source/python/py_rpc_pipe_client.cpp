@@ -9,6 +9,7 @@
 #include "py_rpc_pipe_client.hpp"
 #include "py_exceptions.hpp"
 #include "py_message.hpp"
+#include "py_pipe_stats.hpp"
 #include <chrono>
 
 namespace pyutil {
@@ -216,6 +217,19 @@ static PyObject* PyRpcPipeClient_pipe_name(PyRpcPipeClient* self, PyObject*) {
     return PyUnicode_FromString(self->client->pipe_name().c_str());
 }
 
+// ─── 診断・メトリクス (F-006) ─────────────────────────────────
+
+static PyObject* PyRpcPipeClient_stats(PyRpcPipeClient* self, PyObject*) {
+    if (!check_client(self)) return nullptr;
+    return PyPipeStats_from_stats(self->client->stats());
+}
+
+static PyObject* PyRpcPipeClient_reset_stats(PyRpcPipeClient* self, PyObject*) {
+    if (!check_client(self)) return nullptr;
+    self->client->reset_stats();
+    Py_RETURN_NONE;
+}
+
 // ─── メソッドテーブル ─────────────────────────────────────────────────────
 
 static PyMethodDef PyRpcPipeClient_methods[] = {
@@ -233,6 +247,10 @@ static PyMethodDef PyRpcPipeClient_methods[] = {
      METH_NOARGS, "is_connected() -> bool"},
     {"pipe_name",    reinterpret_cast<PyCFunction>(PyRpcPipeClient_pipe_name),
      METH_NOARGS, "pipe_name() -> str"},
+    {"stats",        reinterpret_cast<PyCFunction>(PyRpcPipeClient_stats),
+     METH_NOARGS, "stats() -> PipeStats\nReturn a diagnostics snapshot."},
+    {"reset_stats",  reinterpret_cast<PyCFunction>(PyRpcPipeClient_reset_stats),
+     METH_NOARGS, "reset_stats() -> None\nReset all counters to 0."},
     {nullptr}
 };
 

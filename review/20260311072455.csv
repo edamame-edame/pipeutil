@@ -1,0 +1,2 @@
+id,severity,category,file,line,issue,impact,basis,status
+R-065,Low,Spec-Quality,spec/F006_diagnostics_metrics.md,"363,417",R-064 修正反映時に誤記（「一丁化」「避り」）が混入している。,実装契約への影響はないが仕様可読性とレビュー効率を低下させる。,`spec/F006_diagnostics_metrics.md:363` および `spec/F006_diagnostics_metrics.md:417` で確認。,Open

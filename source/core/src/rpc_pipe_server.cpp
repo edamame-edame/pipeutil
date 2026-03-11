@@ -2,6 +2,7 @@
 // 仕様: spec/F002_rpc_message_id.md §5, §7
 #include "pipeutil/rpc_pipe_server.hpp"
 #include "pipeutil/pipe_error.hpp"
+#include "pipeutil/pipe_stats.hpp"
 #include "detail/frame_io.hpp"
 #include "detail/platform_factory.hpp"
 
@@ -63,16 +64,31 @@ public:
         is_serving_.store(false, std::memory_order_release);
     }
 
-    // ─── 通常 send / receive (serve_requests 前にのみ使用) ───────────
+    // ─── 通常 send / receive (serve_requests 前にのみ使用) ─────────────────
 
     void send(const Message& msg) {
         std::lock_guard lk{io_mutex_};
-        detail::send_frame(*platform_, msg);
+        try {
+            detail::send_frame(*platform_, msg);
+            stat_msgs_sent_.fetch_add(1, std::memory_order_relaxed);
+            stat_bytes_sent_.fetch_add(msg.size(), std::memory_order_relaxed);
+        } catch (const PipeException&) {
+            stat_errors_.fetch_add(1, std::memory_order_relaxed);
+            throw;
+        }
     }
 
     Message receive(std::chrono::milliseconds timeout) {
         std::lock_guard lk{io_mutex_};
-        return detail::recv_frame(*platform_, timeout.count()).message;
+        try {
+            auto fr = detail::recv_frame(*platform_, timeout.count());
+            stat_msgs_recv_.fetch_add(1, std::memory_order_relaxed);
+            stat_bytes_recv_.fetch_add(fr.message.size(), std::memory_order_relaxed);
+            return fr.message;
+        } catch (const PipeException&) {
+            stat_errors_.fetch_add(1, std::memory_order_relaxed);
+            throw;
+        }
     }
 
     // ─── 状態照会 ─────────────────────────────────────────────────────
@@ -81,6 +97,24 @@ public:
     [[nodiscard]] bool               is_connected() const noexcept { return platform_->is_connected(); }
     [[nodiscard]] bool               is_serving()   const noexcept { return is_serving_.load(std::memory_order_acquire); }
     [[nodiscard]] const std::string& pipe_name()    const noexcept { return pipe_name_; }
+
+    [[nodiscard]] PipeStats stats_snapshot() const noexcept {
+        PipeStats s;
+        s.messages_sent     = stat_msgs_sent_.load(std::memory_order_relaxed);
+        s.messages_received = stat_msgs_recv_.load(std::memory_order_relaxed);
+        s.bytes_sent        = stat_bytes_sent_.load(std::memory_order_relaxed);
+        s.bytes_received    = stat_bytes_recv_.load(std::memory_order_relaxed);
+        s.errors            = stat_errors_.load(std::memory_order_relaxed);
+        return s;
+    }
+
+    void reset_stats() noexcept {
+        stat_msgs_sent_.store(0, std::memory_order_relaxed);
+        stat_msgs_recv_.store(0, std::memory_order_relaxed);
+        stat_bytes_sent_.store(0, std::memory_order_relaxed);
+        stat_bytes_recv_.store(0, std::memory_order_relaxed);
+        stat_errors_.store(0, std::memory_order_relaxed);
+    }
 
 private:
     using RequestHandler = RpcPipeServer::RequestHandler;
@@ -92,6 +126,13 @@ private:
     std::thread                            handler_thread_;
     std::atomic<bool>                      stop_flag_{false};
     std::atomic<bool>                      is_serving_{false};
+
+    // ─ 統計カウンタ (F-006) ────────────────────────────────────────────
+    std::atomic<uint64_t> stat_msgs_sent_{0};
+    std::atomic<uint64_t> stat_msgs_recv_{0};
+    std::atomic<uint64_t> stat_bytes_sent_{0};
+    std::atomic<uint64_t> stat_bytes_recv_{0};
+    std::atomic<uint64_t> stat_errors_{0};
 
     // ─────────────────────────────────────────────────────────────────
     // サービスループ: spec §7.1
@@ -114,6 +155,10 @@ private:
                     std::lock_guard lk{io_mutex_};
                     detail::send_frame(*platform_, resp,
                                        fr.message_id, detail::FLAG_RESPONSE);
+                    stat_msgs_recv_.fetch_add(1, std::memory_order_relaxed);
+                    stat_bytes_recv_.fetch_add(fr.message.size(), std::memory_order_relaxed);
+                    stat_msgs_sent_.fetch_add(1, std::memory_order_relaxed);
+                    stat_bytes_sent_.fetch_add(resp.size(), std::memory_order_relaxed);
                 }
                 // FLAG_REQUEST が立っていないフレームは通常 receive 用だが、
                 // serve_requests 実行中は receive 直接呼び出し禁止のため破棄する。
@@ -155,5 +200,13 @@ bool RpcPipeServer::is_listening()  const noexcept { return impl_->is_listening(
 bool RpcPipeServer::is_connected()  const noexcept { return impl_->is_connected(); }
 bool RpcPipeServer::is_serving()    const noexcept { return impl_->is_serving(); }
 const std::string& RpcPipeServer::pipe_name() const noexcept { return impl_->pipe_name(); }
+
+PipeStats RpcPipeServer::stats() const noexcept {
+    return impl_->stats_snapshot();
+}
+
+void RpcPipeServer::reset_stats() noexcept {
+    impl_->reset_stats();
+}
 
 } // namespace pipeutil

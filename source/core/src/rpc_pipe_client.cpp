@@ -2,6 +2,7 @@
 // 仕様: spec/F002_rpc_message_id.md §4, §6
 #include "pipeutil/rpc_pipe_client.hpp"
 #include "pipeutil/pipe_error.hpp"
+#include "pipeutil/pipe_stats.hpp"
 #include "detail/frame_io.hpp"
 #include "detail/platform_factory.hpp"
 
@@ -48,7 +49,14 @@ public:
 
     void send(const Message& msg) {
         std::lock_guard lk{io_mutex_};
-        detail::send_frame(*platform_, msg);
+        try {
+            detail::send_frame(*platform_, msg);
+            stat_msgs_sent_.fetch_add(1, std::memory_order_relaxed);
+            stat_bytes_sent_.fetch_add(msg.size(), std::memory_order_relaxed);
+        } catch (const PipeException&) {
+            stat_errors_.fetch_add(1, std::memory_order_relaxed);
+            throw;
+        }
     }
 
     // ─── 通常 receive (message_id = 0, キューから取り出す) ───────────
@@ -109,23 +117,69 @@ public:
         }
 
         // 4. 応答を待機（タイムアウト付き）: spec §6.2 R-019
+        const auto t0 = std::chrono::steady_clock::now();  // RTT 計測開始
+
         if (timeout.count() == 0) {
             future.wait();   // 無限待機
         } else {
             if (future.wait_for(timeout) == std::future_status::timeout) {
-                // タイムアウト: pending_map_ から削除
                 std::lock_guard lk{pending_mutex_};
                 pending_map_.erase(id);
+                stat_errors_.fetch_add(1, std::memory_order_relaxed);
                 throw PipeException{PipeErrorCode::Timeout, "send_request timed out"};
             }
         }
-        return future.get();  // PipeException の再送出もここで発生
+
+        // future.get() は PipeException を再送出する場合がある
+        try {
+            Message response = future.get();
+            const auto t1 = std::chrono::steady_clock::now();
+            const auto rtt_ns = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+
+            // 成功: リクエスト・レスポンス分を両方カウント
+            stat_msgs_sent_.fetch_add(1, std::memory_order_relaxed);
+            stat_bytes_sent_.fetch_add(req.size(), std::memory_order_relaxed);
+            stat_msgs_recv_.fetch_add(1, std::memory_order_relaxed);
+            stat_bytes_recv_.fetch_add(response.size(), std::memory_order_relaxed);
+            stat_rpc_calls_.fetch_add(1, std::memory_order_relaxed);
+            stat_rtt_total_ns_.fetch_add(rtt_ns, std::memory_order_relaxed);
+            stat_rtt_last_ns_.store(rtt_ns, std::memory_order_relaxed);
+            return response;
+        } catch (const PipeException&) {
+            stat_errors_.fetch_add(1, std::memory_order_relaxed);
+            throw;
+        }
     }
 
     // ─── 状態照会 ─────────────────────────────────────────────────────
 
     [[nodiscard]] bool               is_connected() const noexcept { return platform_->is_connected(); }
     [[nodiscard]] const std::string& pipe_name()    const noexcept { return pipe_name_; }
+
+    [[nodiscard]] PipeStats stats_snapshot() const noexcept {
+        PipeStats s;
+        s.messages_sent     = stat_msgs_sent_.load(std::memory_order_relaxed);
+        s.messages_received = stat_msgs_recv_.load(std::memory_order_relaxed);
+        s.bytes_sent        = stat_bytes_sent_.load(std::memory_order_relaxed);
+        s.bytes_received    = stat_bytes_recv_.load(std::memory_order_relaxed);
+        s.errors            = stat_errors_.load(std::memory_order_relaxed);
+        s.rpc_calls         = stat_rpc_calls_.load(std::memory_order_relaxed);
+        s.rtt_total_ns      = stat_rtt_total_ns_.load(std::memory_order_relaxed);
+        s.rtt_last_ns       = stat_rtt_last_ns_.load(std::memory_order_relaxed);
+        return s;
+    }
+
+    void reset_stats() noexcept {
+        stat_msgs_sent_.store(0, std::memory_order_relaxed);
+        stat_msgs_recv_.store(0, std::memory_order_relaxed);
+        stat_bytes_sent_.store(0, std::memory_order_relaxed);
+        stat_bytes_recv_.store(0, std::memory_order_relaxed);
+        stat_errors_.store(0, std::memory_order_relaxed);
+        stat_rpc_calls_.store(0, std::memory_order_relaxed);
+        stat_rtt_total_ns_.store(0, std::memory_order_relaxed);
+        stat_rtt_last_ns_.store(0, std::memory_order_relaxed);
+    }
 
 private:
     std::string                            pipe_name_;
@@ -150,7 +204,15 @@ private:
     // ─ RPC 応答待ちテーブル ──────────────────────────────────────────
     std::mutex                             pending_mutex_;
     std::unordered_map<uint32_t, std::promise<Message>> pending_map_;
-
+    // ─ 統計カウンタ (F-006) ────────────────────────────────────────────
+    std::atomic<uint64_t> stat_msgs_sent_{0};
+    std::atomic<uint64_t> stat_msgs_recv_{0};
+    std::atomic<uint64_t> stat_bytes_sent_{0};
+    std::atomic<uint64_t> stat_bytes_recv_{0};
+    std::atomic<uint64_t> stat_errors_{0};
+    std::atomic<uint64_t> stat_rpc_calls_{0};
+    std::atomic<uint64_t> stat_rtt_total_ns_{0};
+    std::atomic<uint64_t> stat_rtt_last_ns_{0};
     // ─────────────────────────────────────────────────────────────────
     // 背景受信ループ
     // ─────────────────────────────────────────────────────────────────
@@ -258,6 +320,14 @@ bool RpcPipeClient::is_connected() const noexcept {
 
 const std::string& RpcPipeClient::pipe_name() const noexcept {
     return impl_->pipe_name();
+}
+
+PipeStats RpcPipeClient::stats() const noexcept {
+    return impl_->stats_snapshot();
+}
+
+void RpcPipeClient::reset_stats() noexcept {
+    impl_->reset_stats();
 }
 
 } // namespace pipeutil

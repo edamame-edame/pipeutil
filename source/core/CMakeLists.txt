@@ -3,6 +3,7 @@ set(CORE_SOURCES
     src/pipe_error.cpp
     src/message.cpp
     src/io_buffer.cpp
+    src/pipe_stats.cpp
     src/pipe_server.cpp
     src/pipe_client.cpp
     src/multi_pipe_server.cpp

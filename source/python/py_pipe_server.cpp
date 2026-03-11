@@ -5,6 +5,7 @@
 #include "py_pipe_server.hpp"
 #include "py_exceptions.hpp"
 #include "py_message.hpp"
+#include "py_pipe_stats.hpp"
 #include "py_debug_log.hpp"
 #include <chrono>
 
@@ -200,6 +201,19 @@ static PyObject* PyPipeServer_exit(PyPipeServer* self, PyObject* /*args*/) {
     Py_RETURN_NONE;
 }
 
+// ─── 診断・メトリクス (F-006) ─────────────────────────────────
+
+static PyObject* PyPipeServer_stats(PyPipeServer* self, PyObject* /*args*/) {
+    if (!check_server(self)) return nullptr;
+    return PyPipeStats_from_stats(self->server->stats());
+}
+
+static PyObject* PyPipeServer_reset_stats(PyPipeServer* self, PyObject* /*args*/) {
+    if (!check_server(self)) return nullptr;
+    self->server->reset_stats();
+    Py_RETURN_NONE;
+}
+
 // ─── プロパティ ───────────────────────────────────────────────────────
 
 static PyObject* PyPipeServer_get_is_listening(PyPipeServer* self, void*) {
@@ -249,6 +263,10 @@ static PyMethodDef PyPipeServer_methods[] = {
      METH_NOARGS, "Context manager entry."},
     {"__exit__",  reinterpret_cast<PyCFunction>(PyPipeServer_exit),
      METH_VARARGS, "Context manager exit (calls close)."},
+    {"stats",       reinterpret_cast<PyCFunction>(PyPipeServer_stats),
+     METH_NOARGS, "stats() -> PipeStats\nReturn a diagnostics snapshot."},
+    {"reset_stats", reinterpret_cast<PyCFunction>(PyPipeServer_reset_stats),
+     METH_NOARGS, "reset_stats() -> None\nReset all counters to 0."},
     {nullptr, nullptr, 0, nullptr}
 };
 

@@ -4,7 +4,9 @@
 #include "pipeutil/pipe_server.hpp"
 #include "pipeutil/pipe_error.hpp"
 #include "detail/platform_factory.hpp"
+#include "detail/session_stats.hpp"     // F-006 統計集約用
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -14,6 +16,7 @@
 #include <semaphore>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace pipeutil {
 
@@ -93,6 +96,25 @@ public:
         return pipe_name_;
     }
 
+    // 全接続の stats を合算したスナップショットを返す（spec §4.3）
+    [[nodiscard]] PipeStats stats_all() const noexcept {
+        std::lock_guard<std::mutex> lk{stats_mutex_};
+        PipeStats total = accumulated_stats_;
+        for (const auto& s : active_stats_) {
+            total += s->snapshot();
+        }
+        return total;
+    }
+
+    // 全接続の stats を一斉リセットする（spec §4.3）
+    void reset_stats_all() noexcept {
+        std::lock_guard<std::mutex> lk{stats_mutex_};
+        accumulated_stats_ = PipeStats{};
+        for (auto& s : active_stats_) {
+            s->reset();
+        }
+    }
+
 private:
     // ─── 設定 ──────────────────────────────────────────────────────────
     std::string  pipe_name_;
@@ -111,6 +133,13 @@ private:
     std::counting_semaphore<64> sem_;   // 同時接続スロット数を max_connections で初期化
     std::mutex                  done_mutex_;
     std::condition_variable     done_cv_;
+
+    // ─── 診断・メトリクス (F-006) ──────────────────────────────────────
+    // stats_mutex_ は accumulated_stats_ と active_stats_ の両方を保護する。
+    // SlotGuard::~SlotGuard()・stats()・reset_stats() が共にこの 1 本を使用する。
+    mutable std::mutex                                    stats_mutex_;
+    PipeStats                                             accumulated_stats_{};
+    std::vector<std::shared_ptr<detail::SessionStats>>    active_stats_;
 
     // ─── acceptor ループ ───────────────────────────────────────────────
 
@@ -134,10 +163,27 @@ private:
 
             // ハンドラスレッドを detach；RAII SlotGuard で確実に sem_.release() する
             std::thread([this, pipe_arg = std::move(accepted)]() mutable {
-                // RAII: デストラクタが sem_.release() と active_count_ デクリメントを保証
+                // セッション単位の統計バッファ（PipeServer と多重書き込み共有）
+                auto session = std::make_shared<detail::SessionStats>();
+                {
+                    std::lock_guard<std::mutex> lk{stats_mutex_};
+                    active_stats_.push_back(session);
+                }
+
+                // RAII: デストラクタが「アクティブリストからの除去」「累積への加算」
+                //        「sem_.release()」「active_count_ デクリメント」を保証
                 struct SlotGuard {
                     Impl& self;
+                    std::shared_ptr<detail::SessionStats> session;
                     ~SlotGuard() {
+                        {
+                            // stats_mutex_ 1 本で除去と加算を原子化し、
+                            // reset_stats() との競合を排除する（spec §4.3）
+                            std::lock_guard<std::mutex> lk{self.stats_mutex_};
+                            auto& v = self.active_stats_;
+                            v.erase(std::remove(v.begin(), v.end(), session), v.end());
+                            self.accumulated_stats_ += session->snapshot();
+                        }
                         self.sem_.release();
                         // カウントが 0 になったら stop() の待機を起床させる
                         if (self.active_count_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
@@ -145,11 +191,13 @@ private:
                             self.done_cv_.notify_all();
                         }
                     }
-                } guard{*this};
+                } guard{*this, session};
 
                 // accept 済みの IPlatformPipe を包む PipeServer を構築（listen/accept 不要）
+                // session を渡し、send/receive カウントをセッションバッファに dual-write する
                 PipeServer conn{PipeServer::FromAcceptedTag{},
-                                pipe_name_, buffer_size_, std::move(pipe_arg)};
+                                pipe_name_, buffer_size_,
+                                std::move(pipe_arg), std::move(session)};
                 try {
                     handler_(std::move(conn));
                 } catch (...) {
@@ -188,6 +236,16 @@ std::size_t MultiPipeServer::active_connections() const noexcept {
 
 const std::string& MultiPipeServer::pipe_name() const noexcept {
     return impl_->pipe_name();
+}
+
+// ─── 診断・メトリクス (F-006) ─────────────────────────────────────────────
+
+PipeStats MultiPipeServer::stats() const noexcept {
+    return impl_->stats_all();
+}
+
+void MultiPipeServer::reset_stats() noexcept {
+    impl_->reset_stats_all();
 }
 
 } // namespace pipeutil
