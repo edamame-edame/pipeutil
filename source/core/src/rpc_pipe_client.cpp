@@ -111,9 +111,17 @@ public:
         }
 
         // 3. FLAG_REQUEST | message_id を付与してフレーム送信
-        {
+        // 送信失敗時は pending_map_ を消去して errors をカウントし再送出する
+        try {
             std::lock_guard lk{io_mutex_};
             detail::send_frame(*platform_, req, id, detail::FLAG_REQUEST);
+        } catch (const PipeException&) {
+            {
+                std::lock_guard lk{pending_mutex_};
+                pending_map_.erase(id);
+            }
+            stat_errors_.fetch_add(1, std::memory_order_relaxed);
+            throw;
         }
 
         // 4. 応答を待機（タイムアウト付き）: spec §6.2 R-019
