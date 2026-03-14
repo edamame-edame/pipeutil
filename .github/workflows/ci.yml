@@ -1,11 +1,11 @@
-# ci.yml — PR / push 高速チェック用ワークフロー
+# ci.yml — Fast-check workflow for PR / push
 #
-# 実行マトリクス方針（parent_reviewer_proposal 提案A 採用）:
+# Matrix policy (parent_reviewer_proposal Plan A adopted):
 #   Windows: Python 3.8, 3.14
 #   Linux  : Python 3.8, 3.11, 3.14
 #
-# フルマトリクス（3.8/3.11/3.13/3.14 × 両OS）は nightly.yml で実施する。
-# リリース前は nightly.yml を workflow_dispatch で手動実行してフル検証する。
+# Full matrix (3.8/3.11/3.13/3.14 x both OS) runs in nightly.yml.
+# Before release, trigger nightly.yml manually via workflow_dispatch for full verification.
 name: CI
 
 on:
@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job 1: C++ ユニットテスト（OS のみマトリクス、版数は変わらないため圧縮不要）
+# Job 1: C++ unit tests (OS-only matrix; no version axis needed)
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
   cpp-tests:
@@ -88,9 +88,9 @@ jobs:
         run: ctest --test-dir build/linux-test --output-on-failure
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job 2: Python テスト（圧縮マトリクス）
-#   Windows: 3.8, 3.14  — 最小版 + 最新版
-#   Linux  : 3.8, 3.11, 3.14  — 最小版 + 中間代表 + 最新版
+# Job 2: Python tests (compressed matrix)
+#   Windows: 3.8, 3.14        — min + latest
+#   Linux  : 3.8, 3.11, 3.14  — min + middle + latest
 # ─────────────────────────────────────────────────────────────────────────────
   python-tests:
     name: Python Tests / ${{ matrix.os }} / py${{ matrix.python-version }}
@@ -99,12 +99,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows: 最小版 + 最新版
+          # Windows: min + latest
           - os: windows-latest
             python-version: "3.8"
           - os: windows-latest
             python-version: "3.14"
-          # Linux: 最小版 + 中間代表 + 最新版
+          # Linux: min + middle + latest
           - os: ubuntu-latest
             python-version: "3.8"
           - os: ubuntu-latest

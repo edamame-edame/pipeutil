@@ -1,8 +1,0 @@
-id,severity,category,file,line,issue,impact,recommendation,evidence,status
-R-016,High,Concurrency,spec/F001_multi_pipe_server.md,4.3,ハンドラスレッドの例外時に sem_.release() が保証されない,例外発生でスロットが枯渇し以後 accept が永久停止する可能性,handler 実行を try/catch で囲み finally 相当で sem_.release と active_count 減算を必ず実行する,4.3 のコード例では release が handler_ の直後にあり例外経路の記述がない,Open
-R-017,Medium,Resource-Lifecycle,spec/F001_multi_pipe_server.md,2.2,handler_threads_ が長時間運用で増加し続ける設計,終了済みスレッドオブジェクトが蓄積しメモリ増加と stop 時 join コスト増大を招く,固定ワーカープール化または完了通知キューで定期回収する方針を明記する,2.2 で vector 保持のみ示され回収戦略が未定義,Open
-R-018,Medium,Spec-Consistency,spec/F001_multi_pipe_server.md,2.1|4.1,acceptor ループ記述が「毎回 PipeServer 作成」と「accept_and_fork で継続受け付け」で不整合,実装時の責務分割が曖昧になりバグ混入リスクが上がる,2.1 の擬似フローを 4.1 と同じ fork 前提へ統一する,2.1 は新 PipeServer 作成を明記し 4.1 は既存ハンドル fork を前提にしている,Open
-R-019,High,Timeout-Contract,spec/F002_rpc_message_id.md,6.2,timeout=0 を無限待機と定義しつつ wait_for(timeout) を使用している,実装すると timeout=0 が即タイムアウトになり API 契約破壊となる,timeout=0 の分岐で future.wait() を使う仕様へ修正する,4章コメントと 6.2 サンプルコードの動作が矛盾している,Open
-R-020,High,Concurrency,spec/F002_rpc_message_id.md,6.1,受信側で pending_map_[message_id].set_value(msg) とすると未知 ID で暗黙挿入が発生する,タイムアウト後の遅延応答で BrokenPromise/例外やメモリ汚染が起こりうる,find で存在確認して未登録 ID は破棄または診断ログに送る,6.1 の擬似コードは map 直接添字アクセスで未登録ケースが未定義,Open
-R-021,Medium,API-Contract,spec/F002_rpc_message_id.md,5|7.1,RpcPipeServer で serve_requests と receive の同時使用時の読み取り主体が未定義,二重受信でフレーム競合し応答欠落やデッドロックの原因になる,serve_requests 実行中は receive/send の直接利用を禁止する状態遷移を明文化する,5章 API に両方公開されるが排他条件が記載されていない,Open
-R-022,Medium,Spec-Consistency,spec/F002_rpc_message_id.md,3.1|9,「PipeClient/PipeServerは変更しない」としつつ変更ファイルに pipe_client.cpp/pipe_server.cpp を列挙している,実装境界が曖昧でレビュー観点漏れや影響範囲見積りミスが発生する,変更許容方針を明確化し「フレーム実装は共通基盤として更新する」と明記する,3.1 と 9章の記述が矛盾,Open

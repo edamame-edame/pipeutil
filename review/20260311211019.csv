@@ -1,4 +1,0 @@
-ID,Severity,Category,File,Section,指摘,影響,根拠,Status
-R-067,Medium,Feature-Completeness,source/core/**,F-008,F-008で要求されたPipeAcl/SDDL対応が未実装だった問題は解消済み,C++コア/Win32/POSIX/Python/テストへの実装反映により提案との差分を解消,`pipe_acl.hpp`新規追加と`win32_pipe.cpp`/`posix_pipe.cpp`/Pythonバインディング/`test_security_acl.cpp`の実装を確認,Resolved
-R-070,Medium,Build-Completeness,source/core/CMakeLists.txt,リンク設定,Win32でSDDL APIを使う実装に対してAdvapi32リンクが不足している,Windowsで未解決外部参照によりビルド失敗の可能性がある,`win32_pipe.cpp`で`ConvertStringSecurityDescriptorToSecurityDescriptorW`を使用する一方`source/core/CMakeLists.txt`の`target_link_libraries(pipeutil_core ...)`にAdvapi32がない,Open
-R-071,Medium,Input-Validation,source/python/py_pipe_server.cpp;source/python/py_multi_pipe_server.cpp,ACL引数検証,Pythonのacl引数が列挙値範囲を検証せず不正値を受理する,OSごとに異なる暗黙フォールバックが発生し期待しないACL設定になる,`PyArg_ParseTupleAndKeywords(..."s|niz"/"s|nniz")`で整数受理後に`static_cast<PipeAcl>(acl_int)`し`win32_pipe.cpp`のswitch defaultがnullptrへフォールバック,Open

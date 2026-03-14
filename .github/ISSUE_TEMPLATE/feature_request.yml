@@ -1,28 +1,28 @@
-name: 機能提案
-description: 新機能・改善案を提案する
+name: Feature Request
+description: Propose a new feature or improvement
 title: "[Feature] "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        ## 機能提案
-        提案内容を具体的に記入してください。
+        ## Feature Request
+        Please describe your proposal in detail.
 
   - type: textarea
     id: motivation
     attributes:
-      label: 背景・課題
-      description: なぜこの機能が必要か、現状の問題点を説明してください。
-      placeholder: "例：現在の PipeServer は 1 対 1 のみで、複数クライアントを扱えない。"
+      label: Background / Problem
+      description: Explain why this feature is needed and what the current limitation is.
+      placeholder: "e.g. The current PipeServer only supports 1-to-1 connections; it cannot handle multiple clients."
     validations:
       required: true
 
   - type: textarea
     id: proposal
     attributes:
-      label: 提案する API / 動作
-      description: 追加・変更したい API を具体的に（コード例歓迎）。
+      label: Proposed API / Behavior
+      description: Describe the API or behavior change you want (code examples welcome).
       placeholder: |
         ```cpp
         MultiPipeServer server("my_pipe");
@@ -34,31 +34,31 @@ body:
   - type: textarea
     id: test_plan
     attributes:
-      label: ✅ テスト計画（必須）
+      label: "✅ Test Plan (Required)"
       description: |
-        この機能をどのようにテストするか記載してください。
-        テスト計画のない提案はレビュー優先度が下がります。
+        Describe how you plan to test this feature.
+        Proposals without a test plan will receive lower review priority.
       placeholder: |
-        - C++: `tests/cpp/test_multi_server.cpp` — 3 クライアント同時接続テスト
+        - C++: `tests/cpp/test_multi_server.cpp` — 3 simultaneous client connections
         - Python: `tests/python/test_multi_server.py` — `TestMultiConnect::test_3_clients`
-        - 境界値: max_connections 超過時に PipeException が発生すること
+        - Boundary: PipeException is raised when max_connections is exceeded
     validations:
       required: true
 
   - type: dropdown
     id: priority
     attributes:
-      label: 優先度（提案者視点）
+      label: Priority (from proposer's perspective)
       options:
-        - High — 業務・開発に支障あり
-        - Medium — あると便利
-        - Low — いつかほしい
+        - High — blocking my work or development
+        - Medium — would be useful
+        - Low — nice to have eventually
     validations:
       required: true
 
   - type: input
     id: proposal_ref
     attributes:
-      label: 提案書参照（任意）
-      description: "`docs/feature_proposals_v0.2.md` の番号があれば記入"
+      label: Proposal Reference (optional)
+      description: "Enter the number from `docs/feature_proposals_v0.2.md` if applicable"
       placeholder: "F-001"

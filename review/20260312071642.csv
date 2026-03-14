@@ -1,2 +1,0 @@
-ID,Severity,Category,File,Section,指摘,影響,根拠,Status
-R-080,Medium,API-Contract / Core Message,source/python/py_message.cpp;python/pipeutil/__init__.pyi,Message 入力型契約,"Message の入力型契約が実装（bytes/bytearrayのみ）とドキュメント/型スタブ（str許容）で不一致。","利用者が str 入力可能と誤認し、実行時 TypeError や型チェックの誤判定を招く。","`source/python/py_message.cpp` の `PyMessage_init` は bytes/bytearray 以外を TypeError で拒否し、`tp_doc` には `Message(data: bytes | str)` と記載。加えて `python/pipeutil/__init__.pyi` も `def __init__(..., data: bytes | bytearray | str)` となっている。",Open

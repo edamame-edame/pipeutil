@@ -1,3 +1,0 @@
-id,severity,category,status,summary,location
-R-078,Medium,Concurrency-Lifecycle,Resolved,cancel() の active_write_cap_ キャンセル経路追加,source/python/py_async_pipe.cpp cancel()
-R-079,Low,Review-Process,Resolved,whole.md 状態不整合の修正確認,review/whole.md

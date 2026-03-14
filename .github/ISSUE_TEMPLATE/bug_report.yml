@@ -1,32 +1,32 @@
-name: バグ報告
-description: 動作しない・クラッシュするなどの不具合を報告する
+name: Bug Report
+description: Report a defect such as a crash or incorrect behavior
 title: "[Bug] "
 labels: ["bug"]
 body:
   - type: textarea
     id: description
     attributes:
-      label: 不具合の概要
-      placeholder: "例：クライアントが接続後すぐに切断すると PipeServer::receive が返らない"
+      label: Description
+      placeholder: "e.g. PipeServer::receive does not return when a client connects then immediately disconnects"
     validations:
       required: true
 
   - type: textarea
     id: repro
     attributes:
-      label: 再現手順
+      label: Steps to Reproduce
       placeholder: |
-        1. PipeServer を listen / accept する
-        2. クライアントが connect してすぐ close する
-        3. receive() が無限ブロックする
+        1. Call PipeServer.listen / accept
+        2. Connect a client and immediately close it
+        3. receive() blocks indefinitely
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: 期待する動作
-      placeholder: "ConnectionReset 例外が発生するべき"
+      label: Expected Behavior
+      placeholder: "A ConnectionReset exception should be raised"
     validations:
       required: true
 
@@ -40,14 +40,14 @@ body:
         - Windows 10
         - Ubuntu 22.04
         - Ubuntu 24.04
-        - その他
+        - Other
     validations:
       required: true
 
   - type: input
     id: version
     attributes:
-      label: pipeutil バージョン
+      label: pipeutil Version
       placeholder: "v0.1.0"
     validations:
       required: true
@@ -55,9 +55,9 @@ body:
   - type: textarea
     id: test_case
     attributes:
-      label: ✅ 回帰テストのスケッチ（任意だが推奨）
+      label: "✅ Regression Test Sketch (optional but recommended)"
       description: |
-        修正確認のためのテストコードを記載すると対応が早まります。
+        Providing a test case sketch helps speed up the fix.
       placeholder: |
         ```python
         def test_immediate_disconnect_raises_connection_reset(make_server):

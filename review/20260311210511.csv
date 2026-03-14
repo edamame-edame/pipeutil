@@ -1,2 +1,0 @@
-ID,Severity,Category,File,Section,指摘,影響,根拠,Status
-R-067,Medium,Feature-Completeness,source/core/include/pipeutil/pipe_server.hpp,コンストラクタ,F-008（Windows セキュリティ記述子 ACL）が提案上は実装済み扱いだが実装コードに PipeAcl / SDDL 対応が存在しない,異なる権限ユーザー/サービス間通信でアクセス制御要件を満たせず権限エラーや過剰権限設定の回避策依存を招く,source/core/**に PipeAcl / SECURITY_ATTRIBUTES / ConvertStringSecurityDescriptorToSecurityDescriptor 実装が皆無,Resolved

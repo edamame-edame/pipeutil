@@ -1,3 +1,0 @@
-id,severity,category,file,line,issue,impact,recommendation,evidence,status
-R-023,High,Spec-Consistency,spec/F002_rpc_message_id.md,210-229,RpcPipeServer API 例から stop() 宣言が脱落しておりライフサイクル契約と矛盾,run_in_background=true 時の停止手段が API 上存在しない設計に見え実装誤誘導を招く,公開 API 例に void stop() noexcept; を復元し serve_requests との関係を明記する,同節コメントに stop() 言及がある一方で close() しか宣言されていない,Open
-R-024,Medium,Spec-Quality,spec/F002_rpc_message_id.md,130-131|226|347,文書に文字化け/誤字(実裃,広張,却不変更,UB 漕れ,擅当)が混入し仕様解釈を阻害,実装者が誤読して設計意図を誤るリスクがある,該当語を自然な技術文に修正し用語統一する,再レビュー時点の本文に複数箇所の異常文字列を確認,Open

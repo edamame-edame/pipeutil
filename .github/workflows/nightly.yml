@@ -1,28 +1,28 @@
-# nightly.yml — 夜間フルマトリクス検証ワークフロー
+# nightly.yml — Nightly full-matrix verification workflow
 #
-# 実行マトリクス方針（parent_reviewer_proposal 提案B 採用）:
-#   Windows + Linux × Python 3.8 / 3.11 / 3.13 / 3.14
+# Matrix policy (parent_reviewer_proposal Plan B adopted):
+#   Windows + Linux x Python 3.8 / 3.11 / 3.13 / 3.14
 #
-# トリガー:
-#   - 毎日 UTC 02:00 自動実行
-#   - workflow_dispatch による手動実行
+# Triggers:
+#   - Automatic daily run at UTC 02:00
+#   - Manual run via workflow_dispatch
 #
-# 役割分担:
-#   ci.yml     → PR の高速フィードバック（圧縮マトリクス）
-#   nightly.yml → 全サポートバージョンの互換性網羅検証
+# Role split:
+#   ci.yml      → fast PR feedback (compressed matrix)
+#   nightly.yml → full compatibility coverage across all supported versions
 name: Nightly Full Matrix
 
 on:
   schedule:
-    - cron: "0 2 * * *"   # UTC 02:00 毎日
-  workflow_dispatch:       # 手動実行
+    - cron: "0 2 * * *"   # daily at UTC 02:00
+  workflow_dispatch:       # manual trigger
 
 concurrency:
   group: nightly-${{ github.ref }}
   cancel-in-progress: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job 1: C++ ユニットテスト（ci.yml と同一 — 夜間でも健全性を維持）
+# Job 1: C++ unit tests (same as ci.yml — kept in nightly for health tracking)
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
   cpp-tests:
@@ -83,8 +83,8 @@ jobs:
         run: ctest --test-dir build/linux-test --output-on-failure
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Job 2: Python テスト フルマトリクス
-#   Windows + Linux × 3.8 / 3.11 / 3.13 / 3.14
+# Job 2: Python tests — full matrix
+#   Windows + Linux x 3.8 / 3.11 / 3.13 / 3.14
 # ─────────────────────────────────────────────────────────────────────────────
   python-tests:
     name: "[Nightly] Python Tests / ${{ matrix.os }} / py${{ matrix.python-version }}"

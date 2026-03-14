@@ -1,4 +1,0 @@
-ID,Severity,Category,Summary,File,Status
-R-074,Medium,Security-Hardening / POSIX Runtime,ensure_dir() の stat() を lstat() + S_ISDIR チェックに置き換え,source/core/src/platform/posix_pipe.cpp,Resolved
-R-068,Medium,Feature-Completeness / F-004 Phase 2,Linux native backend を有効化（_on_linux_readable / _on_linux_writable の実装完了）,source/python/py_async_pipe.cpp;source/python/py_async_pipe.hpp;source/python/py_async_module.cpp;python/pipeutil/aio.py,Resolved
-R-069,Low,Test-Completeness / F-007,test_timeout.cpp / test_error_mapping.cpp を作成して CMakeLists.txt に登録,tests/cpp/test_timeout.cpp;tests/cpp/test_error_mapping.cpp;tests/cpp/CMakeLists.txt,Resolved

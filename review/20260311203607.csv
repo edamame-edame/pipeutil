@@ -1,2 +1,0 @@
-id,severity,category,file,line,issue,impact,basis,status
-R-066,Medium,Metrics-Contract,source/core/src/rpc_pipe_client.cpp,"107-116,128,150",send_request() の送信フェーズで PipeException が発生した場合に errors が加算されず pending_map_ エントリが残留する。,統計値が過少計上されるだけでなく pending_map_ 残留により長時間運用でメモリ消費増加と message_id 再利用時の探索コスト増大を招く。,pending_map_ 登録（line 107-110）の後に送信（line 116）が try/catch 外で実行されており送信失敗時に erase されない。errors 加算は timeout（line 128）と future.get() 例外（line 150）のみ。,Open

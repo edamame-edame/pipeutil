@@ -1,59 +1,69 @@
-## 変更概要
+﻿## Summary
 
-<!-- このプルリクエストで何を変更したか、1〜3 文で説明してください。 -->
+<!-- Describe what this PR changes in 1–3 sentences. -->
 
-## 変更種別
+## Type of Change
 
-- [ ] バグ修正
-- [ ] 新機能（`docs/feature_proposals_v0.2.md` の提案番号: F-__ ）
-- [ ] リファクタリング
-- [ ] ドキュメント
-- [ ] CI / ビルド設定
-- [ ] その他
+- [ ] Bug fix
+- [ ] New feature (`docs/feature_proposals_v0.2.md` proposal number: F-__ )
+- [ ] Refactoring
+- [ ] Documentation
+- [ ] CI / build configuration
+- [ ] Other
 
-## 関連 Issue / チケット
+## Related Issue / Ticket
 
 Closes #
 
 ---
 
-## ✅ テストチェックリスト（必須）
+## ✅ Test Checklist (Required)
 
-> **テストを追加・更新しないマージは原則禁止です。**
-> 以下のチェックをすべて記入してから PR をオープンしてください。
+> **PRs without tests added or updated will not be merged.**
+> Complete all checks below before opening the PR.
 
-### C++ テスト（`tests/cpp/`）
+### C++ Tests (`tests/cpp/`)
 
-- [ ] 既存テストがすべて通過している（`ctest --preset run-test`）
-- [ ] **今回の変更に対応したテストを追加した** または 既存テストで網羅されている理由を説明した
+- [ ] All existing tests pass (`ctest --preset run-test`)
+- [ ] **Added tests covering this change**, or explained why existing tests are sufficient
 
-  > 追加したテストファイル / テスト名:  
-  > （例）`tests/cpp/test_message.cpp` → `MessageTest/LargePayload_64KiB`
+  > Test file / test name added:  
+  > (e.g.) `tests/cpp/test_message.cpp` → `MessageTest/LargePayload_64KiB`
 
-### Python テスト（`tests/python/`）
+### Python Tests (`tests/python/`)
 
-- [ ] 既存テストがすべて通過している（`pytest tests/python/`）
-- [ ] **今回の変更に対応した pytest を追加した** または 既存テストで網羅されている理由を説明した
+- [ ] All existing tests pass (`pytest tests/python/`)
+- [ ] **Added pytest covering this change**, or explained why existing tests are sufficient
 
-  > 追加したテストファイル / 関数名:  
-  > （例）`tests/python/test_roundtrip.py` → `TestBasicRoundTrip::test_echo_server`
+  > Test file / function name added:  
+  > (e.g.) `tests/python/test_roundtrip.py` → `TestBasicRoundTrip::test_echo_server`
 
-### 境界値・回帰テスト
+### Boundary & Regression Tests
 
-- [ ] 修正したバグには最低 1 件の回帰テストを追加した
-- [ ] タイムアウト・断切れ・NULL バイトなど境界条件を考慮した
+- [ ] Added at least one regression test for any bug fix
+- [ ] Considered boundary conditions: timeouts, disconnects, NULL bytes, etc.
 
 ---
 
-## 動作確認
+## Verification
 
-| 環境 | 確認方法 | 結果 |
+| Environment | Method | Result |
 |---|---|---|
 | Windows / MSVC | `ctest --preset run-test` | ✅ / ❌ |
 | Windows / Python | `pytest tests/python/` | ✅ / ❌ |
 
 ---
 
-## レビュー観点
+## Review Focus
 
-<!-- レビュアーに特に確認してほしい点を記載 -->
+<!-- Specific areas you want the reviewer to check -->
+
+---
+
+## Review-Informed Checklist
+
+- [ ] Public API, type stubs, docstrings, README, and sample code signatures are consistent
+- [ ] If Python C extension was touched: ownership, GIL, return value checks, and export visibility were verified
+- [ ] If frame format or payload constraints were touched: tables, diagrams, structs, and boundary tests were updated together
+- [ ] If Windows/POSIX shutdown paths or I/O completion was touched: `close`/`shutdown`/`poll`/overlapped completion races were verified
+- [ ] If metrics or timeouts were touched: accumulation contract, reset races, and finite-timeout regression were verified

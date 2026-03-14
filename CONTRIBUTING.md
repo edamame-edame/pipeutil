@@ -1,29 +1,29 @@
-# コントリビューションガイド
+# Contributing Guide
 
-## 目次
+## Table of Contents
 
-1. [環境構築](#1-環境構築)
-2. [C++ テストの実行](#2-c-テストの実行)
-3. [Python テストの実行](#3-python-テストの実行)
-4. [新機能を追加するときのテスト手順](#4-新機能を追加するときのテスト手順)
-5. [テストを書くときの規則](#5-テストを書くときの規則)
-6. [PR を出す前のチェックリスト](#6-pr-を出す前のチェックリスト)
-7. [CI で何が動くか](#7-ci-で何が動くか)
+1. [Environment Setup](#1-environment-setup)
+2. [Running C++ Tests](#2-running-c-tests)
+3. [Running Python Tests](#3-running-python-tests)
+4. [Testing Workflow for New Features](#4-testing-workflow-for-new-features)
+5. [Test Writing Conventions](#5-test-writing-conventions)
+6. [Pre-PR Checklist](#6-pre-pr-checklist)
+7. [What Runs in CI](#7-what-runs-in-ci)
 
 ---
 
-## 1. 環境構築
+## 1. Environment Setup
 
-**必要なもの**
-| ツール | バージョン | 備考 |
+**Prerequisites**
+| Tool | Version | Notes |
 |---|---|---|
 | CMake | ≥ 3.25 | |
-| Visual Studio | 2022 (17) | Windows のみ |
-| GCC / Clang | C++20 対応 | Linux のみ |
+| Visual Studio | 2022 (17) | Windows only |
+| GCC / Clang | C++20-compatible | Linux only |
 | Python | 3.8 - 3.14 | |
-| Git | 任意 | |
+| Git | any | |
 
-**リポジトリのクローン**
+**Clone the repository**
 ```powershell
 git clone https://github.com/edamame-edame/pipeutil.git
 cd pipeutil
@@ -31,22 +31,22 @@ cd pipeutil
 
 ---
 
-## 2. C++ テストの実行
+## 2. Running C++ Tests
 
 ```powershell
-# 構成（vs-test プリセット: Debug + PIPEUTIL_BUILD_TESTS=ON）
+# Configure (vs-test preset: Debug + PIPEUTIL_BUILD_TESTS=ON)
 cmake --preset vs-test
 
-# ビルド
+# Build
 cmake --build --preset build-test
 
-# テスト実行
+# Run tests
 ctest --preset run-test
 ```
 
-`ctest --preset run-test --output-on-failure` で失敗時の詳細出力が得られます。
+Use `ctest --preset run-test --output-on-failure` to see detailed output on failure.
 
-**Ubuntu の場合**
+**On Ubuntu**
 ```bash
 cmake -B build/linux-test -G Ninja \
     -DCMAKE_BUILD_TYPE=Debug \
@@ -58,66 +58,66 @@ ctest --test-dir build/linux-test --output-on-failure
 
 ---
 
-## 3. Python テストの実行
+## 3. Running Python Tests
 
 ```powershell
-# セットアップ（初回のみ）
+# First-time setup
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[test]"   # pipeutil + pytest + pytest-timeout
 
-# テスト実行
+# Run tests
 pytest tests/python/ -v
 ```
 
-**特定テストのみ実行**
+**Run a specific test**
 ```powershell
 pytest tests/python/test_timeout.py -v -k "rx_timeout"
 ```
 
-**タイムアウトを変えて実行する場合**
+**Run with a custom timeout**
 ```powershell
 pytest tests/python/ --timeout=60
 ```
 
 ---
 
-## 4. 新機能を追加するときのテスト手順
+## 4. Testing Workflow for New Features
 
-> **ルール: 機能の実装コードと同じ PR にテストを含めること。テストなしの実装 PR は原則マージしません。**
+> **Rule: every implementation PR must include tests. PRs without tests will not be merged.**
 
-### ステップ 1 — C++ テストを書く
+### Step 1 — Write C++ tests
 
-`tests/cpp/` に新しいテストファイルを追加するか、既存ファイルを拡張します。
+Add a new test file under `tests/cpp/`, or extend an existing one.
 
 ```
 tests/cpp/
-  test_message.cpp      ← Message クラス用
-  test_io_buffer.cpp    ← IOBuffer 用
-  test_error.cpp        ← PipeErrorCode / PipeException 用
-  test_roundtrip.cpp    ← send/receive 統合テスト用
-  test_<新機能名>.cpp   ← ← 新規追加
+  test_message.cpp      ← for the Message class
+  test_io_buffer.cpp    ← for IOBuffer
+  test_error.cpp        ← for PipeErrorCode / PipeException
+  test_roundtrip.cpp    ← send/receive integration tests
+  test_<feature>.cpp    ← add new file here
 ```
 
-`tests/cpp/CMakeLists.txt` に以下を追記します:
+Register it in `tests/cpp/CMakeLists.txt`:
 
 ```cmake
-pipeutil_add_test(test_<新機能名>  test_<新機能名>.cpp)
+pipeutil_add_test(test_<feature>  test_<feature>.cpp)
 ```
 
-### ステップ 2 — Python テストを書く
+### Step 2 — Write Python tests
 
-`tests/python/` にテストを追加します。
+Add tests under `tests/python/`.
 
 ```
 tests/python/
   test_message.py
   test_roundtrip.py
   test_timeout.py
-  test_<新機能名>.py   ← ← 新規追加
+  test_<feature>.py     ← add new file here
 ```
 
-### ステップ 3 — ローカルで全テストを確認する
+### Step 3 — Verify all tests pass locally
 
 ```powershell
 # C++
@@ -129,97 +129,97 @@ ctest --preset run-test
 pytest tests/python/ -v
 ```
 
-すべて PASS したら PR を作成します。
+Once all tests pass, open a PR.
 
 ---
 
-## 5. テストを書くときの規則
+## 5. Test Writing Conventions
 
 ### C++ (Google Test)
 
-| 事項 | ルール |
+| Item | Convention |
 |---|---|
-| テスト Suite 名 | `<クラス名>Test` または `<機能>Test` |
-| テスト名 | `<条件>_<期待結果>` 形式（例: `DefaultConstruct_IsEmpty`）|
-| パイプ名 | `unique_pipe("suffix")` ヘルパーで固有名を生成する |
-| タイムアウト設定 | 3000 ms を標準とし、大容量転送は 10000 ms まで許容 |
-| `EXPECT_*` vs `ASSERT_*` | 後続ステップが前提に依存する場合は `ASSERT_*` を使う |
+| Test suite name | `<ClassName>Test` or `<Feature>Test` |
+| Test name | `<Condition>_<ExpectedResult>` (e.g. `DefaultConstruct_IsEmpty`) |
+| Pipe name | Generate unique names using the `unique_pipe("suffix")` helper |
+| Timeout | 3000 ms as standard; up to 10000 ms for large-payload transfers |
+| `EXPECT_*` vs `ASSERT_*` | Use `ASSERT_*` when later steps depend on a precondition |
 
 ### Python (pytest)
 
-| 事項 | ルール |
+| Item | Convention |
 |---|---|
-| ファイル名 | `test_<機能名>.py` |
-| クラス名 | `Test<シナリオ名>` |
-| 関数名 | `test_<条件>_<期待結果>` |
-| フィクスチャ | `conftest.py` の `make_server` を活用する |
-| タイムアウト | `receive(timeout_ms)` には必ず有限値を指定する |
-| 並列安全性 | `unique_pipe()` でテストごとに固有パイプ名を生成する |
+| File name | `test_<feature>.py` |
+| Class name | `Test<ScenarioName>` |
+| Function name | `test_<condition>_<expected_result>` |
+| Fixtures | Use `make_server` from `conftest.py` |
+| Timeout | Always pass a finite value to `receive(timeout_ms)` |
+| Isolation | Use `unique_pipe()` to generate a unique pipe name per test |
 
-### 境界値テストで必ず確認するポイント
+### Boundary conditions to always verify
 
-- [ ] タイムアウト（短すぎる / ちょうど / 0 = 無限）
-- [ ] 空ペイロード（0 バイト）
-- [ ] NULL バイトを含むペイロード
-- [ ] 1 バイト / 64 KiB / 1 MiB の大容量
-- [ ] 接続前・切断後に I/O 操作したとき
-- [ ] 相手側がクローズしたとき（`ConnectionReset` / `BrokenPipe`）
+- [ ] Timeout (too short / exact / 0 = infinite)
+- [ ] Empty payload (0 bytes)
+- [ ] Payload containing NULL bytes
+- [ ] 1 byte / 64 KiB / 1 MiB large payloads
+- [ ] I/O operations before connect or after disconnect
+- [ ] Peer-side close (`ConnectionReset` / `BrokenPipe`)
 
 ---
 
-## 6. PR を出す前のチェックリスト
+## 6. Pre-PR Checklist
 
 ```
-[ ] ctest --preset run-test がすべて PASS
-[ ] pytest tests/python/ がすべて PASS
-[ ] 今回の変更に対応した新規テストを追加した
-[ ] バグ修正の場合: 回帰テストを追加した
-[ ] PR テンプレートのテストチェックリストを記入した
+[ ] ctest --preset run-test — all passed
+[ ] pytest tests/python/   — all passed
+[ ] Added new tests covering this change
+[ ] For bug fixes: added a regression test
+[ ] Filled in the test checklist in the PR template
 ```
 
 ---
 
-## 7. CI で何が動くか
+## 7. What Runs in CI
 
-CI は **PR 高速系（`ci.yml`）** と **夜間フルマトリクス（`nightly.yml`）** の 2 系統で運用します。
+CI runs two pipelines: **PR fast checks (`ci.yml`)** and **nightly full matrix (`nightly.yml`)**.
 
-### PR 高速系（`ci.yml`）
+### PR Fast Checks (`ci.yml`)
 
-push / PR をトリガーに自動実行されます。**圧縮マトリクス**でフィードバックを高速化します。
+Triggered automatically on push / PR with a **compressed matrix** for fast feedback.
 
-| Job | OS | Python | 内容 |
+| Job | OS | Python | Description |
 |---|---|---|---|
 | `cpp-tests` | Windows / Linux | — | CMake Debug → CTest |
-| `python-tests` | Windows | 3.8, 3.14 | wheel ビルド → pytest |
-| `python-tests` | Linux | 3.8, 3.11, 3.14 | wheel ビルド → pytest |
+| `python-tests` | Windows | 3.8, 3.14 | build wheel → pytest |
+| `python-tests` | Linux | 3.8, 3.11, 3.14 | build wheel → pytest |
 
-CI が赤のままの PR はマージできません。
+PRs with a failing CI cannot be merged.
 
-### 夜間フルマトリクス（`nightly.yml`）
+### Nightly Full Matrix (`nightly.yml`)
 
-毎日 UTC 02:00 に自動実行されます。**全サポートバージョンの互換性を網羅検証**します。
-`workflow_dispatch` で手動実行も可能です。
+Runs automatically at UTC 02:00 every day. **Covers full compatibility across all supported versions.**
+Can also be triggered manually via `workflow_dispatch`.
 
-| Job | OS | Python | 内容 |
+| Job | OS | Python | Description |
 |---|---|---|---|
 | `cpp-tests` | Windows / Linux | — | CMake Debug → CTest |
-| `python-tests` | Windows / Linux | 3.8, 3.11, 3.13, 3.14 | wheel ビルド → pytest |
+| `python-tests` | Windows / Linux | 3.8, 3.11, 3.13, 3.14 | build wheel → pytest |
 
-### 使い分け方針
+### When to use which
 
-- PR マージ判断: PR 高速系がすべて green であること
-- リリース前: `nightly.yml` を手動実行（`workflow_dispatch`）してフルマトリクスを確認
-- 中間バージョン固有の不具合: nightly の失敗通知で検出
+- Merge decision: all PR fast checks must be green
+- Before release: run `nightly.yml` manually (`workflow_dispatch`) to confirm the full matrix
+- Version-specific regressions: detected via nightly failure notifications
 
 ---
 
-## 補足: テスト追加を忘れないための仕組み
+## Note: Safeguards to Prevent Missing Tests
 
-このプロジェクトには以下の仕組みが組み込まれています:
+The following mechanisms are built into this project:
 
-| 仕組み | 場所 | 効果 |
+| Mechanism | Location | Effect |
 |---|---|---|
-| PR テンプレート | `.github/PULL_REQUEST_TEMPLATE.md` | テストチェックリストが PR 本文に自動挿入される |
-| Issue テンプレート | `.github/ISSUE_TEMPLATE/feature_request.yml` | 機能提案時にテスト計画の記載を必須にする |
-| GitHub Actions CI | `.github/workflows/ci.yml` | テストが壊れている PR は自動的にブロックされる |
-| このドキュメント | `CONTRIBUTING.md` | 手順と規則を一箇所に集約 |
+| PR template | `.github/PULL_REQUEST_TEMPLATE.md` | Test checklist is auto-inserted into every PR body |
+| Issue template | `.github/ISSUE_TEMPLATE/feature_request.yml` | Requires a test plan for feature proposals |
+| GitHub Actions CI | `.github/workflows/ci.yml` | PRs that break tests are blocked automatically |
+| This document | `CONTRIBUTING.md` | Centralizes procedures and conventions |

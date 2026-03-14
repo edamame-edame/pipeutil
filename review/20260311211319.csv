@@ -1,3 +1,0 @@
-ID,Severity,Category,File,Section,指摘,影響,根拠,Status
-R-070,Medium,Build-Completeness,source/core/CMakeLists.txt,target_link_libraries,Win32でSDDL APIを使う実装に対してAdvapi32リンクが不足していた,Windowsで未解決外部参照によりビルド失敗の可能性があった,`win32_pipe.cpp`で`ConvertStringSecurityDescriptorToSecurityDescriptorW`を使用する一方`CMakeLists.txt`にAdvapi32がなかった,Resolved
-R-071,Medium,Input-Validation,source/python/py_pipe_server.cpp;source/python/py_multi_pipe_server.cpp,ACL引数検証,Pythonのacl引数が列挙値範囲を検証せず不正値を受理していた,OSごとに異なる暗黙フォールバックが発生し期待しないACL設定になる可能性があった,`PyArg_ParseTupleAndKeywords`で整数受理後に`static_cast<PipeAcl>(acl_int)`し`switch defaultがnullptrへフォールバック`していた,Resolved

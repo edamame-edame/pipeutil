@@ -1,8 +1,0 @@
-id,severity,category,file,line,issue,impact,recommendation,evidence,status
-R-001,High,Spec-Inconsistency,spec/00_overview.md,175,"最大メッセージサイズが 2 GB と定義されているが、他仕様と矛盾","実装上限と運用上限が分離されず、互換性不良やOOM方針不明確化を招く","上限を 'protocol上限(4GiB-1)' と '運用上限(例:2GiB)' に分離して明記する","spec/00_overview.md:175 と spec/01_cpp_core.md:397 の不一致",Open
-R-002,Critical,Protocol-Format,spec/02_protocol.md,19,"フレーム図の reserved が 3 bytes、定義表は 2 bytes で不一致","送受信実装が別解釈になり相互接続不能になる","図・表・構造体定義を 16 bytes ヘッダに一致させて統一する","spec/02_protocol.md:19 と spec/02_protocol.md:36 の不一致",Open
-R-003,High,Naming-Contract,spec/01_cpp_core.md,166,"Windows パイプ名規約の公開API説明とプラットフォーム実装説明が不一致","利用者が指定名と実体名の対応を誤解し接続失敗の原因になる","公開仕様で '論理名' と '実体名(内部プレフィックス付与)' を分離定義する","spec/01_cpp_core.md:166 と spec/03_platform.md:76 の不一致",Open
-R-004,Critical,Python-CAPI,spec/04_python_wrapper.md,415,"PyModule_AddObject の参照カウント説明と実装例が矛盾","参照リークまたは二重解放を誘発しクラッシュリスクがある","所有権規約を再定義し、成功/失敗時の INCREF/DECREF 方針を統一記載する","spec/04_python_wrapper.md:251-256 と 415 の不一致",Open
-R-005,Medium,Python-Packaging,spec/04_python_wrapper.md,276,"パッケージ内 import が絶対形式 (_pipeutil) で記載","実行環境によって import 解決失敗のリスク","パッケージ内は相対 import (. _pipeutil) に統一し、配布形態別注意を追記する","spec/04_python_wrapper.md:276",Open
-R-006,High,Windows-IPC,spec/03_platform.md,102,"ConnectNamedPipe の境界ケース(ERROR_PIPE_CONNECTED)の扱いが未定義","接続済みクライアントをエラー扱いし誤タイムアウト化する恐れ","ERROR_PIPE_CONNECTED を成功として扱う分岐を明記する","spec/03_platform.md:102-110",Open
-R-007,Medium,Error-Policy,spec/00_overview.md,27,"エラー方針が '例外+戻り値' と記載される一方、API仕様は例外中心","呼び出し側の契約が曖昧化し実装方針がぶれる","公開API契約を '例外中心' か '戻り値併用' のどちらかに統一明記する","spec/00_overview.md:27 と spec/01_cpp_core.md 全体",Open

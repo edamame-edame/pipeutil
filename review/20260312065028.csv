@@ -1,3 +1,0 @@
-ID,Category,Severity,File,Lines,Title,Status,Notes
-R-076,Concurrency-Lifecycle,Medium,source/python/py_async_pipe.cpp,"801-843, 1083-1180",Linux async active capsule クリア漏れ,Resolved,"LinuxReadCtx/LinuxWriteCtx に owner_impl バックポインタを追加。linux_finish_read/read_err/write の各終了パスで schedule_fire_* 呼出後に Py_XDECREF(cap) で active_cap_ をクリア。use-after-free を防ぐため schedule_fire_success より後に cap 解放。Impl 前方宣言を anonymous namespace 前に追加。"
-R-077,Protocol-Correctness,Medium,source/python/py_async_pipe.cpp,"1219-1282",Linux async payload 上限チェック欠如・CRC 条件スキップ,Resolved,"psz > 0x7FFFFFFFu で Overflow エラー返却を追加（Windows 実装と統一）。if (expected_crc != 0) 条件を撤廃し常時 CRC 検証するよう変更。"
