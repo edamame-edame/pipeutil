@@ -62,12 +62,46 @@ void PosixPipe::ensure_dir() {
             throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
                                           "Failed to create /tmp/pipeutil/"};
         }
+        // 既存ディレクトリの場合: 所有者・モードを検証し、不正権限なら拒否する (R-073)
+        // lstat() を使いシンボリックリンクを追わない。S_ISDIR で実体型を確認する (R-074)
+        struct stat st{};
+        if (lstat("/tmp/pipeutil", &st) != 0) {
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
+                                          "lstat() failed on /tmp/pipeutil/"};
+        }
+        // シンボリックリンクや非ディレクトリ（通常ファイル等）は即拒否 (R-074)
+        if (!S_ISDIR(st.st_mode)) {
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::AccessDenied,
+                                          "/tmp/pipeutil exists but is not a directory"};
+        }
+        // 所有者が自プロセスの UID と一致しない場合は拒否（他ユーザーが先にディレクトリを作成した）
+        if (st.st_uid != ::getuid()) {
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::AccessDenied,
+                                          "/tmp/pipeutil/ is owned by a different user"};
+        }
+        // パーミッションが 0700 より広い場合は拒否（グループ/その他への読み書き実行ビットを禁止）
+        if ((st.st_mode & 0777) != 0700) {
+            // 矯正: 権限を 0700 に絞る（失敗した場合は AccessDenied で終了）
+            if (chmod("/tmp/pipeutil", 0700) != 0) {
+                throw pipeutil::PipeException{pipeutil::PipeErrorCode::AccessDenied,
+                                              "/tmp/pipeutil/ has unsafe permissions and chmod failed"};
+            }
+        }
     }
 }
 
 // ─── サーバー操作 ─────────────────────────────────────────────────
 
-void PosixPipe::server_create(const std::string& pipe_name) {
+void PosixPipe::server_create(const std::string& pipe_name,
+                               pipeutil::PipeAcl acl,
+                               const std::string& /*custom_sddl*/) {
+    // Linux では PipeAcl::Custom（SDDL 文字列）は非対応
+    if (acl == pipeutil::PipeAcl::Custom) {
+        throw pipeutil::PipeException{
+            pipeutil::PipeErrorCode::InvalidArgument,
+            "PipeAcl::Custom is not supported on Linux; use Default/LocalSystem/Everyone"};
+    }
+
     if (listening_) {
         throw pipeutil::PipeException{pipeutil::PipeErrorCode::AlreadyConnected,
                                       "Already listening"};
@@ -98,7 +132,18 @@ void PosixPipe::server_create(const std::string& pipe_name) {
         throw pipeutil::PipeException{map_errno(e), "bind() failed"};
     }
 
-    // 4. listen（バックログ 1）
+    // 4. ACL に応じたソケットファイルパーミッション設定（Default: umask のまま変更しない）
+    if (acl != pipeutil::PipeAcl::Default) {
+        const mode_t mode = (acl == pipeutil::PipeAcl::Everyone) ? 0666 : 0600;
+        if (chmod(sock_path_.c_str(), mode) != 0) {
+            const int e = errno;
+            close(server_fd_);
+            server_fd_ = -1;
+            throw pipeutil::PipeException{map_errno(e), "chmod failed on socket file"};
+        }
+    }
+
+    // 5. listen（バックログ 1）
     if (listen(server_fd_, 1) != 0) {
         const int e = errno;
         close(server_fd_);
@@ -192,6 +237,8 @@ std::unique_ptr<IPlatformPipe> PosixPipe::server_accept_and_fork(int64_t timeout
 
 void PosixPipe::server_close() noexcept {
     if (client_fd_ >= 0) {
+        // 接続中のクライアント fd に対しても shutdown でブロック中スレッドをアンブロック
+        shutdown(client_fd_, SHUT_RDWR);
         close(client_fd_);
         client_fd_ = -1;
     }
@@ -266,6 +313,10 @@ void PosixPipe::client_connect(const std::string& pipe_name, int64_t timeout_ms)
 
 void PosixPipe::client_close() noexcept {
     if (client_fd_ >= 0) {
+        // shutdown(SHUT_RDWR) で他スレッドが poll()/recv() でブロックしている場合に
+        // EOF を通知してアンブロックしてから close する。
+        // Linux では close(fd) だけでは他スレッドの poll() は解除されない（POSIX 未定義）。
+        shutdown(client_fd_, SHUT_RDWR);
         close(client_fd_);
         client_fd_ = -1;
     }

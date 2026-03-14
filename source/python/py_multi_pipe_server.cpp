@@ -6,6 +6,7 @@
 //   stop()   : ブロッキング（handler 完了待ち）のため GIL を解放する。
 //   handler  : C++ worker スレッドから呼ばれるため PyGILState_Ensure() で GIL を再取得する。
 
+#include "py_compat.hpp"  // must precede all Python includes; provides 3.8+ shims
 #include "py_multi_pipe_server.hpp"
 #include "py_pipe_server.hpp"       // PyPipeServer / PyPipeServer_Type
 #include "py_exceptions.hpp"
@@ -54,15 +55,18 @@ static PyObject* PyMultiPipeServer_new(PyTypeObject* type,
 static int PyMultiPipeServer_init(PyMultiPipeServer* self,
                                    PyObject* args, PyObject* kwds) {
     static const char* kwlist[] = {
-        "pipe_name", "max_connections", "buffer_size", nullptr
+        "pipe_name", "max_connections", "buffer_size", "acl", "custom_sddl", nullptr
     };
     const char* pipe_name     = nullptr;
     Py_ssize_t  max_conn      = 8;
     Py_ssize_t  buffer_size   = 65536;
+    int         acl_int       = 0;   // PipeAcl::Default
+    const char* custom_sddl   = nullptr;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|nn",
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|nniz",
                                      const_cast<char**>(kwlist),
-                                     &pipe_name, &max_conn, &buffer_size)) {
+                                     &pipe_name, &max_conn, &buffer_size,
+                                     &acl_int, &custom_sddl)) {
         return -1;
     }
     if (max_conn < 1 || max_conn > 64) {
@@ -74,13 +78,22 @@ static int PyMultiPipeServer_init(PyMultiPipeServer* self,
         PyErr_SetString(PyExc_ValueError, "buffer_size must be positive");
         return -1;
     }
+    // PipeAcl の有効範囲は 0(Default)〜3(Custom)。範囲外は ValueError (R-071)
+    if (acl_int < 0 || acl_int > 3) {
+        PyErr_SetString(PyExc_ValueError,
+                        "acl must be a PipeAcl constant: "
+                        "0=Default, 1=LocalSystem, 2=Everyone, 3=Custom");
+        return -1;
+    }
 
     try {
         delete self->server;
         self->server = new pipeutil::MultiPipeServer{
             std::string{pipe_name},
             static_cast<std::size_t>(max_conn),
-            static_cast<std::size_t>(buffer_size)
+            static_cast<std::size_t>(buffer_size),
+            static_cast<pipeutil::PipeAcl>(acl_int),
+            custom_sddl ? std::string{custom_sddl} : std::string{}
         };
     } catch (const pipeutil::PipeException& e) {
         set_python_exception(e);
@@ -122,7 +135,8 @@ static PyObject* PyMultiPipeServer_serve(PyMultiPipeServer* self, PyObject* args
 
             PyObject* py_conn = wrap_pipe_server(std::move(conn));
             if (py_conn) {
-                PyObject* result = PyObject_CallOneArg(py_handler, py_conn);
+                // Python 3.8 互換: PyObject_CallOneArg は 3.9+、代替として PyObject_CallFunctionObjArgs
+                PyObject* result = PyObject_CallFunctionObjArgs(py_handler, py_conn, (PyObject*)NULL);
                 Py_XDECREF(result);
                 Py_DECREF(py_conn);
                 // ハンドラ内例外は握り潰す（スレッドをクリーンに終了させる）

@@ -1,0 +1,4 @@
+ID,Severity,Category,File,Section,指摘,影響,根拠,Status
+R-072,Medium,API-Contract,python/pipeutil/__init__.py,公開API再エクスポート,"F-008 で追加した Python の PipeAcl がパッケージ公開APIに再エクスポートされていない問題を確認。","Python 利用者が `pipeutil.PipeAcl` を参照できず ACL 指定が困難になる。","`python/pipeutil/__init__.py` に `PipeAcl` の import と `__all__` 追加が反映されていることを確認。",Resolved
+R-073,Low,Security-Hardening,source/core/src/platform/posix_pipe.cpp,ensure_dir(),"`/tmp/pipeutil` 既存時の所有者・権限検証がない問題を確認。","期待外の権限状態を許容しローカル環境での安全性低下を招く。","`ensure_dir()` に `stat()`・UID 一致確認・`chmod(0700)` 矯正が反映されていることを確認。",Resolved
+R-075,Low,Review-Process,review/whole.md,セクション整合,"`whole.md` で修正済み項目が未修正セクションに残る状態不整合。","レビュー進捗の誤読を招く。","本更新で R-072/R-073 を未修正セクションから除外し、修正確認済み項目へ集約して整合を回復。",Resolved

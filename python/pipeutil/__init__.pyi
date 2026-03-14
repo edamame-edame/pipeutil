@@ -4,14 +4,32 @@
 
 from __future__ import annotations
 
-from types import TracebackType
+from types import SimpleNamespace, TracebackType
+
+# ─── PipeAcl ─────────────────────────────────────────────────────────
+
+class _PipeAclNS(SimpleNamespace):
+    """パイプサーバーのアクセス制御レベル定数。
+
+    - ``PipeAcl.Default``      : OS デフォルト ACL（後方互換）
+    - ``PipeAcl.LocalSystem``  : SYSTEM + Builtin Admins + IU
+    - ``PipeAcl.Everyone``     : 全ユーザー（注意: セキュリティリスク）
+    - ``PipeAcl.Custom``       : custom_sddl で SDDL 指定（Windows のみ有効）
+    """
+    Default:     int
+    LocalSystem: int
+    Everyone:    int
+    Custom:      int
+
+PipeAcl: _PipeAclNS
+"""パイプ ACL 定数の名前空間。``PipeAcl.Default`` / ``PipeAcl.Everyone`` などで使用する。"""
 
 # ─── Message ──────────────────────────────────────────────────────────
 
 class Message:
     """ペイロードを保持する不変値型。"""
 
-    def __init__(self, data: bytes | bytearray | str) -> None: ...
+    def __init__(self, data: bytes | bytearray) -> None: ...
 
     @property
     def data(self) -> bytes:
@@ -91,6 +109,8 @@ class PipeServer:
         self,
         pipe_name: str,
         buffer_size: int = 65536,
+        acl: int = 0,
+        custom_sddl: str = "",
     ) -> None: ...
 
     def listen(self) -> None:
@@ -348,6 +368,8 @@ class MultiPipeServer:
         pipe_name: str,
         max_connections: int = 8,
         buffer_size: int = 65536,
+        acl: int = 0,
+        custom_sddl: str = "",
     ) -> None: ...
 
     def serve(self, handler: _Callable[[PipeServer], None]) -> None:

@@ -174,7 +174,7 @@ PyTypeObject PyMessage_Type = {
     nullptr,                                   // tp_setattro
     &PyMessage_as_buffer,                       // tp_as_buffer
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,  // tp_flags
-    "pipeutil Message object.\n\nMessage(data: bytes | str)\n",  // tp_doc
+    "pipeutil Message object.\n\nMessage(data: bytes | bytearray)\n",  // tp_doc
     nullptr,                                   // tp_traverse
     nullptr,                                   // tp_clear
     nullptr,                                   // tp_richcompare

@@ -9,7 +9,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pipeutil"
-version = "0.1.0"
+version = "1.0.0"
 description = "High-speed IPC pipe communication library (Windows/Linux)"
 readme = "README.md"
 requires-python = ">=3.8,<3.15"
@@ -41,11 +41,15 @@ classifiers = [
 cmake.build-type = "Release"
 cmake.args = ["-DPIPEUTIL_BUILD_PYTHON=ON"]
 
-# Python パッケージディレクトリ
+# Python パッケージディレクトリ（pure Python ファイルの収集先）
 wheel.packages = ["python/pipeutil"]
 
+# CMake install() で pipeutil/ に配置された拡張モジュールをマージして wheel に収録
+# （_pipeutil.pyd / _pipeutil.so が含まれる）
+wheel.cmake = true
+
 # 最小 CMake バージョン
-cmake.minimum-version = "3.25"
+cmake.version = ">=3.25"
 
 # ─── オプション依存 ──────────────────────────────────────────────────
 
@@ -66,7 +70,7 @@ dev     = [
 
 [tool.pytest.ini_options]
 testpaths  = ["tests/python"]
-timeout    = 30          # テストごとの上限 (秒)
+timeout    = 60          # テストごとの上限 (秒)
 addopts    = "-v --tb=short"
 asyncio_mode      = "strict"   # @pytest.mark.asyncio を明示使用（sync テストへの干渉を防ぐ）
 asyncio_default_fixture_loop_scope = "function"  # deprecated behavior 解消

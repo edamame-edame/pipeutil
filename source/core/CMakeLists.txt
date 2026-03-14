@@ -19,7 +19,15 @@ else()
 endif()
 
 # ─── ターゲット定義 ───────────────────────────────────────────────────
-add_library(pipeutil_core SHARED ${CORE_SOURCES})
+# Windows: SHARED (.dll) — _pipeutil.pyd がロード時に隣接 DLL を参照
+# Linux/macOS: STATIC — _pipeutil.so に完全埋め込みし manylinux wheel を自己完結にする
+if(WIN32)
+    add_library(pipeutil_core SHARED ${CORE_SOURCES})
+else()
+    add_library(pipeutil_core STATIC ${CORE_SOURCES})
+    # STATIC を MODULE/_pipeutil.so にリンクするため -fPIC 必須
+    set_property(TARGET pipeutil_core PROPERTY POSITION_INDEPENDENT_CODE ON)
+endif()
 
 # DLL エクスポートマクロの自動生成（CMAKE 組み込み機能）
 # → include/pipeutil/pipeutil_export.hpp を生成する
@@ -50,7 +58,11 @@ target_compile_options(pipeutil_core PRIVATE
 # ─── プラットフォーム依存リンク ───────────────────────────────────────
 # std::thread / std::counting_semaphore が pthread を使う環境（Linux 等）に対応
 find_package(Threads REQUIRED)
-target_link_libraries(pipeutil_core PRIVATE Threads::Threads)
+target_link_libraries(pipeutil_core PRIVATE
+    Threads::Threads
+    # Advapi32: ConvertStringSecurityDescriptorToSecurityDescriptorW (F-008 / sddl.h)
+    $<$<PLATFORM_ID:Windows>:Advapi32>
+)
 
 # ─── バージョン情報 ───────────────────────────────────────────────────
 set_target_properties(pipeutil_core PROPERTIES

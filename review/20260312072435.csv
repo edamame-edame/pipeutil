@@ -1,0 +1,2 @@
+id,severity,category,status,summary,location
+R-080,Medium,API-Contract / Core Message,Resolved,Message入力型契約の不整合（tp_doc/型スタブ）修正を再確認し問題なし,source/python/py_message.cpp;python/pipeutil/__init__.pyi

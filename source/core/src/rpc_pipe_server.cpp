@@ -1,6 +1,7 @@
 // rpc_pipe_server.cpp — RpcPipeServer pimpl 実装
 // 仕様: spec/F002_rpc_message_id.md §5, §7
 #include "pipeutil/rpc_pipe_server.hpp"
+#include "pipeutil/pipe_acl.hpp"
 #include "pipeutil/pipe_error.hpp"
 #include "pipeutil/pipe_stats.hpp"
 #include "detail/frame_io.hpp"
@@ -28,7 +29,8 @@ public:
     // ─── ライフサイクル ──────────────────────────────────────────────
 
     void listen() {
-        platform_->server_create(pipe_name_);
+        // RpcPipeServer は ACL カスタマイズ非対応; Default を使用 (F-008 後方互換)
+        platform_->server_create(pipe_name_, PipeAcl::Default, "");
     }
 
     void accept(std::chrono::milliseconds timeout) {

@@ -2,6 +2,7 @@
 #include "pipeutil/io_buffer.hpp"
 #include <algorithm>
 #include <cassert>
+#include <cstring>  // std::memcpy
 
 namespace pipeutil {
 

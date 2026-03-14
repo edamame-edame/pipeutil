@@ -1,0 +1,2 @@
+id,severity,category,file,line,issue,impact,basis,status
+R-066,Medium,Metrics-Contract,source/core/src/rpc_pipe_client.cpp,"111-123","send_request() の送信失敗時に pending_map_ 残留と errors 未加算が起こる問題が修正済み。","pending_map_ クリーンアップと errors 加算が保証され、長時間運用時の統計過少計上と不要エントリ残留リスクを解消。","`detail::send_frame(...)` が try/catch 化され、catch で `pending_map_.erase(id)` と `stat_errors_.fetch_add(1, ...)` を実行する実装を確認。",Closed

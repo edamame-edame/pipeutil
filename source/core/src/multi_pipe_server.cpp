@@ -24,10 +24,13 @@ namespace pipeutil {
 
 class MultiPipeServer::Impl {
 public:
-    Impl(std::string name, std::size_t max_conn, std::size_t buf_size)
+    Impl(std::string name, std::size_t max_conn, std::size_t buf_size,
+         PipeAcl acl = PipeAcl::Default, std::string custom_sddl = "")
         : pipe_name_(std::move(name))
         , buffer_size_(buf_size)
         , max_connections_(max_conn)
+        , acl_(acl)
+        , custom_sddl_(std::move(custom_sddl))
         , sem_(static_cast<std::ptrdiff_t>(max_conn))  // スロット上限をセマフォで管理
     {
         assert(max_conn >= 1 && max_conn <= 64);
@@ -48,7 +51,7 @@ public:
 
         // プラットフォーム初期化とリスン開始
         platform_ = std::make_unique<detail::PlatformPipeImpl>(buffer_size_);
-        platform_->server_create(pipe_name_);
+        platform_->server_create(pipe_name_, acl_, custom_sddl_);
 
         // acceptor スレッド起動（run_acceptor がループを担う）
         acceptor_thread_ = std::thread([this] { run_acceptor(); });
@@ -119,8 +122,8 @@ private:
     // ─── 設定 ──────────────────────────────────────────────────────────
     std::string  pipe_name_;
     std::size_t  buffer_size_;
-    std::size_t  max_connections_;
-
+    std::size_t  max_connections_;    PipeAcl      acl_;
+    std::string  custom_sddl_;
     // ─── 状態 ──────────────────────────────────────────────────────────
     std::function<void(PipeServer)>         handler_;
     std::unique_ptr<detail::IPlatformPipe>  platform_;
@@ -212,8 +215,11 @@ private:
 
 MultiPipeServer::MultiPipeServer(std::string pipe_name,
                                  std::size_t max_connections,
-                                 std::size_t buffer_size)
-    : impl_(std::make_unique<Impl>(std::move(pipe_name), max_connections, buffer_size))
+                                 std::size_t buffer_size,
+                                 PipeAcl acl,
+                                 std::string custom_sddl)
+    : impl_(std::make_unique<Impl>(std::move(pipe_name), max_connections, buffer_size,
+                                    acl, std::move(custom_sddl)))
 {}
 
 MultiPipeServer::~MultiPipeServer() = default;

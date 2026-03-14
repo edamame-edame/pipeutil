@@ -1,15 +1,15 @@
 ﻿# レビュー集約（whole）
 
-最終更新: 2026-03-11 20:36:07
-最新レビューCSV: review/20260311203607.csv
+最終更新: 2026-03-14 21:35:23
+最新レビューCSV: review/20260314213523.csv
 
 ## 1. 最新レビューの要約
 
-- 未修正指摘数（Medium 以上）: 1
-- 今回再レビューでの新規指摘（Medium 以上）: 1 件
+- 未修正指摘数（Medium 以上）: 0
+- 今回再レビューでの新規指摘（Medium 以上）: 0 件
 - 今回再レビューでの新規指摘（Low）: 0 件
-- 修正確認済み指摘数: 65（R-065 まで集約済み）
-- 今回対象: F-006 実装コミット `77a94f4`（診断・メトリクス API）
+- 修正確認済み指摘数: 86
+- 継続未修正: なし
 
 ---
 
@@ -79,22 +79,36 @@
 - R-063（Metrics-Contract / F-006）: `SessionStats + active_stats_` 方式へ改め、`stats()` がアクティブ接続を含む全接続合算を返す契約を復元したこと。
 - R-064（Concurrency-Contract / F-006）: `accumulated_mutex_` と `active_stats_mutex_` を `stats_mutex_` 1本に統合し、`SlotGuard::~SlotGuard()` が「active除去＋accumulated加算」を単一ロック下で原子的に実行するよう改め、`reset_stats()` との競合を完全排除したこと。
 - R-065（Spec-Quality / F-006）: R-064 修正反映時に混入した誤記（`一丁化` / `避り`）を仕様本文から除去し、可読性を復元したこと。
+- R-066（Metrics-Contract / F-006実装）: `RpcPipeClient::send_request()` の送信フェーズを try/catch 化し、送信失敗時に `pending_map_.erase(id)` と `errors` 加算を必ず実行するよう修正し、残留エントリと過少計上のリスクを解消したこと。
+- R-067（Feature-Completeness / F-008）: `PipeAcl` / SDDL 対応が C++ コア・Win32/POSIX 実装・Python バインディング・型スタブ・テストへ反映され、提案との差分が解消されたこと（周辺課題 R-070, R-071 は修正済み）。
+- R-070（Build-Completeness / F-008）: `source/core/CMakeLists.txt` の `target_link_libraries(pipeutil_core ...)` に `$<$<PLATFORM_ID:Windows>:Advapi32>` を追加し、Win32 ビルドで `ConvertStringSecurityDescriptorToSecurityDescriptorW` が正しくリンクされるよう修正した。✅
+- R-071（Input-Validation / F-008）: `py_pipe_server.cpp` および `py_multi_pipe_server.cpp` の `PyPipeServer_init` / `PyMultiPipeServer_init` に `acl_int < 0 || acl_int > 3` の範囲チェックを追加し、無効値を `ValueError` として即時検出するよう修正した。✅
+- R-072（API-Contract / F-008 Python Binding）: `python/pipeutil/__init__.py` の再エクスポートと `__all__` に `PipeAcl` を追加し、`pipeutil.PipeAcl` を公開 API として利用可能にした。✅
+- R-073（Security-Hardening / POSIX Runtime）: `ensure_dir()` に `stat()`・UID 一致確認・`chmod(0700)` 矯正を追加し、既存ディレクトリ時の権限安全性を強化した。✅
+- R-075（Review-Process / Report Integrity）: `whole.md` の修正済み/未修正セクション不整合を解消し、状態記載を一貫化した。✅
+- R-074（Security-Hardening / POSIX Runtime）: `ensure_dir()` の `stat()` を `lstat()` に変更し `S_ISDIR` チェックを追加。シンボリックリンク・非ディレクトリを明示拒否するよう修正した。✅
+- R-068（Feature-Completeness / F-004 Phase 2）: `py_async_pipe.cpp` に `linux_on_readable_handler` / `linux_on_writable_handler` を実装し、`py_async_module.cpp` の `NotImplementedError` スタブを実呼出に置き換えた。`aio.py` の `_NATIVE_BACKEND` ゲートも `True` に変更して Linux native backend を有効化した。✅
+- R-069（Test-Completeness / F-007）: `tests/cpp/test_timeout.cpp` および `tests/cpp/test_error_mapping.cpp` を新規作成し、`CMakeLists.txt` にテストターゲットを登録した。✅
+- R-076（Async-Lifecycle / F-004 Phase 2）: Linux async I/O 完了後に `active_read_cap_` / `active_write_cap_` をクリアしない問題。`owner_impl` バックポインタ経由で `Py_XDECREF` を実施し、use-after-free を防ぐため `schedule_fire_*` を cap 解放前に呼ぶ設計に変更した。✅
+- R-077（Protocol-Correctness / F-004 Phase 2）: payload サイズ上限チェック追加（`> 0x7FFFFFFFu`）・CRC 無条件検証（`if (expected_crc != 0)` 条件削除）。✅
+- R-078（Concurrency-Lifecycle / F-004 Phase 2）: `cancel()` に write 経路（`remove_writer + Py_CLEAR(active_write_cap_)`）を追加し、read 経路と対称な実装に修正した。✅
+- R-079（Review-Process / Report Integrity）: `whole.md` の要約とセクション3/4 の不整合を解消。今回の更新で状態記載を一貫化した。✅
+- R-080（API-Contract / Core Message）: `tp_doc` の `bytes | str` 表記を `bytes | bytearray` に修正し、`__init__.pyi` のシグネチャから `str` を除去した。✅
+- R-081（Platform-Compatibility）: Python 3.8 の `PyMODINIT_FUNC` は `visibility("default")` 属性を欠くため、`-fvisibility=hidden` 環境でビルドした `.so` の `PyInit__pipeutil` が hidden になりインポート不能。`py_compat.hpp` でマクロ再定義 + `#pragma GCC visibility push(default)` で修正済み。✅
+- R-082（Platform-Compatibility）: Linux の `close(fd)` は他スレッドの `poll()` ブロックを解除しない（POSIX 未定義）。`posix_pipe.cpp` の `client_close()` / `server_close()` に `shutdown(SHUT_RDWR)` を追加して修正済み。✅
 
 ---
 
 ## 3. 未修正指摘（Medium 以上）
 
-- R-066（Metrics-Contract / F-006実装）
-	**指摘**: `RpcPipeClient::send_request()` で `pending_map_` 登録後の `detail::send_frame()` が try/catch 外にあり、送信失敗時に `errors` 未加算かつ `pending_map_` の消し漏れが発生する。
-  → `send_frame` 呼び出しを `try { … } catch (const PipeException&)` で包み、例外発生時に `pending_map_.erase(id)` と `stat_errors_.fetch_add(1, ...)` を実行して再送出するよう修正した。✅
-  **影響**: 統計値が過少計上されるだけでなく、長時間運用で `pending_map_` が不要に肥大化し、`message_id` 衝突回避ループの探索コスト増加を招く。
-  **根拠**: `source/core/src/rpc_pipe_client.cpp` で `pending_map_[id] = ...` 登録後に `detail::send_frame(*platform_, req, id, detail::FLAG_REQUEST)` が直実行され、失敗時に `pending_map_.erase(id)` へ到達しない。
-  **対応状況**: Fixed
+なし
+
 ---
 
 ## 4. 未修正指摘（Low）
 
-現在、未修正の Low 指摘はありません。
+なし
+
 
 ---
 

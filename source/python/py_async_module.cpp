@@ -5,8 +5,7 @@
 // 公開型: AsyncPipeHandle
 // モジュール関数: _fire_future, _on_linux_readable, _on_linux_writable
 
-#define PY_SSIZE_T_CLEAN
-#include <Python.h>
+#include "py_compat.hpp"  // must precede all Python includes; provides 3.8+ shims
 
 #include "py_async_pipe.hpp"
 #include "py_debug_log.hpp"
@@ -398,38 +397,22 @@ mod_fire_future(PyObject* module, PyObject* args) {
     return fire_future_impl(module, args);
 }
 
-// Linux 用: fd が readable になったときに event loop が呼ぶ
+// Linux 用: fd が readable になったときに event loop が呼ぶ (R-068)
 static PyObject*
 mod_on_linux_readable(PyObject* /*module*/, PyObject* cap) {
 #ifndef _WIN32
-    if (!PyCapsule_CheckExact(cap)) {
-        PyErr_SetString(PyExc_TypeError, "expected capsule");
-        return nullptr;
-    }
-    auto* ctx = static_cast<pipeutil::detail::LinuxReadCtx_fwd*>(
-        PyCapsule_GetPointer(cap, "lrc"));
-    // 実装は py_async_pipe.cpp の anonymous namespace 内にあるが
-    // extern でなく module 関数経由で呼ぶ構造につき、
-    // ここから直接呼び出しは不可。
-    // NOTE: Linux 側の readable ハンドラは将来のリリースで完全実装予定。
-    // 現在は概念実証として future を cancel 状態のまま通知する。
-    PyErr_SetString(PyExc_NotImplementedError,
-                    "_on_linux_readable: full implementation pending");
-    return nullptr;
+    return pipeutil::async::linux_on_readable_handler(cap);
 #else
     (void)cap;
     Py_RETURN_NONE;
 #endif
 }
 
-// Linux 用: fd が writable になったときに event loop が呼ぶ
+// Linux 用: fd が writable になったときに event loop が呼ぶ (R-068)
 static PyObject*
 mod_on_linux_writable(PyObject* /*module*/, PyObject* cap) {
 #ifndef _WIN32
-    (void)cap;
-    PyErr_SetString(PyExc_NotImplementedError,
-                    "_on_linux_writable: full implementation pending");
-    return nullptr;
+    return pipeutil::async::linux_on_writable_handler(cap);
 #else
     (void)cap;
     Py_RETURN_NONE;
@@ -457,6 +440,10 @@ static struct PyModuleDef module_def = {
     module_methods,
 };
 
+// Python 3.8 visibility fix — see _pipeutil_module.cpp のコメント参照
+#ifdef __GNUC__
+#  pragma GCC visibility push(default)
+#endif
 PyMODINIT_FUNC
 PyInit__pipeutil_async(void) {
     // ─── AsyncPipeHandle 型を確定 ─────────────────────────────────────
@@ -510,3 +497,6 @@ PyInit__pipeutil_async(void) {
 
     return m;
 }
+#ifdef __GNUC__
+#  pragma GCC visibility pop
+#endif

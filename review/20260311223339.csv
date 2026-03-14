@@ -1,0 +1,3 @@
+ID,Severity,Category,File,Section,指摘,影響,根拠,Status
+R-074,Medium,Security-Hardening,source/core/src/platform/posix_pipe.cpp,ensure_dir(),"`/tmp/pipeutil` 既存時の検証が `stat()` ベースであり、シンボリックリンク/非ディレクトリの明示拒否がない。","意図しないパス解決や不正な配置先を許容する余地が残り、ローカル環境での安全性が低下する。","`ensure_dir()` は `stat("/tmp/pipeutil", &st)` 後に UID と mode を確認するのみで、`lstat` と `S_ISDIR` による実体型検証がない。",Open
+R-075,Low,Review-Process,review/whole.md,セクション整合,"`review/whole.md` で R-072/R-073 を修正済みとして要約に記載しつつ、未修正指摘セクションに `対応状況: Open` で残しており状態が矛盾している。","レビュー進捗の誤読を招き、次回レビュー時の判断コストが上がる。","`review/whole.md` の要約（修正確認済み指摘数 73）と詳細セクション（R-072/R-073 が Open）に不整合がある。",Open

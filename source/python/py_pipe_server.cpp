@@ -38,17 +38,27 @@ static PyObject* PyPipeServer_new(PyTypeObject* type,
 }
 
 static int PyPipeServer_init(PyPipeServer* self, PyObject* args, PyObject* kwds) {
-    static const char* kwlist[] = {"pipe_name", "buffer_size", nullptr};
-    const char* pipe_name = nullptr;
-    Py_ssize_t buffer_size = 65536;
+    static const char* kwlist[] = {"pipe_name", "buffer_size", "acl", "custom_sddl", nullptr};
+    const char* pipe_name   = nullptr;
+    Py_ssize_t  buffer_size = 65536;
+    int         acl_int     = 0;          // PipeAcl::Default
+    const char* custom_sddl = nullptr;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|n",
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|niz",
                                      const_cast<char**>(kwlist),
-                                     &pipe_name, &buffer_size)) {
+                                     &pipe_name, &buffer_size,
+                                     &acl_int, &custom_sddl)) {
         return -1;
     }
     if (buffer_size <= 0) {
         PyErr_SetString(PyExc_ValueError, "buffer_size must be positive");
+        return -1;
+    }
+    // PipeAcl の有効範囲は 0(Default)〜3(Custom)。範囲外は ValueError (R-071)
+    if (acl_int < 0 || acl_int > 3) {
+        PyErr_SetString(PyExc_ValueError,
+                        "acl must be a PipeAcl constant: "
+                        "0=Default, 1=LocalSystem, 2=Everyone, 3=Custom");
         return -1;
     }
 
@@ -56,7 +66,9 @@ static int PyPipeServer_init(PyPipeServer* self, PyObject* args, PyObject* kwds)
         delete self->server;
         self->server = new pipeutil::PipeServer{
             std::string{pipe_name},
-            static_cast<std::size_t>(buffer_size)};
+            static_cast<std::size_t>(buffer_size),
+            static_cast<pipeutil::PipeAcl>(acl_int),
+            custom_sddl ? std::string{custom_sddl} : std::string{}};
     } catch (const pipeutil::PipeException& e) {
         set_python_exception(e);
         return -1;

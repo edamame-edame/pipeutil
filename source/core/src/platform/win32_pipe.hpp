@@ -12,6 +12,7 @@
 #include <windows.h>
 
 #include "pipeutil/detail/platform_pipe.hpp"
+#include "pipeutil/pipe_acl.hpp"
 #include <memory>
 #include <string>
 
@@ -29,7 +30,9 @@ public:
     Win32Pipe& operator=(Win32Pipe&&)      = delete;
 
     // サーバー操作
-    void server_create(const std::string& pipe_name) override;
+    void server_create(const std::string& pipe_name,
+                       pipeutil::PipeAcl acl,
+                       const std::string& custom_sddl) override;
     void server_accept(int64_t timeout_ms)            override;
     std::unique_ptr<IPlatformPipe> server_accept_and_fork(int64_t timeout_ms) override;
     void stop_accept() noexcept                       override;
@@ -61,6 +64,9 @@ private:
     bool         connected_      = false;
     std::size_t  buf_size_;
     std::wstring pipe_name_wstr_;  // server_accept_and_fork で再作成するために保存
+    // ACL 設定 (F-008): server_accept_and_fork での再作成にも同一の ACL を再適用するために保持する
+    pipeutil::PipeAcl acl_          = pipeutil::PipeAcl::Default;
+    std::string       custom_sddl_  = "";
 
     /// 論理名 → Windows 名前付きパイプパス変換
     static std::wstring to_pipe_path(const std::string& name);

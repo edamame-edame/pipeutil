@@ -7,13 +7,14 @@
 //   serve_requests の handler (Python callable):
 //     C++ worker スレッドから呼ばれるため PyGILState_Ensure() で GIL を再取得する。
 
-#define PY_SSIZE_T_CLEAN
+#include "py_compat.hpp"  // must precede all Python includes; provides 3.8+ shims
 #include "py_rpc_pipe_server.hpp"
 #include "py_exceptions.hpp"
 #include "py_message.hpp"
 #include "py_pipe_stats.hpp"
 #include <chrono>
 #include <atomic>
+#include <memory>
 
 namespace pyutil {
 
@@ -209,20 +210,30 @@ static PyObject* PyRpcPipeServer_serve_requests(PyRpcPipeServer* self,
         return nullptr;
     }
 
-    // handler の参照カウントを増やし、C++ ラムダにキャプチャする
+    // shared_ptr に py_handler の所有権を持たせる。
+    // デストラクタで GIL を取得して Py_DECREF するため、フォアグラウンド・バックグラウンド
+    // いずれのモードでもラムダのライフタイムに合わせて安全に解放できる。
     Py_INCREF(py_handler);
+    auto handler_ref = std::shared_ptr<PyObject>(py_handler, [](PyObject* p) {
+        PyGILState_STATE g = PyGILState_Ensure();
+        Py_DECREF(p);
+        PyGILState_Release(g);
+    });
 
     // C++ handler ラムダ: C++ worker スレッドから呼ばれる
     // → GIL を取得して Python callable を呼び出す
+    // handler_ref を値キャプチャし、shared_ptr が参照カウントを管理。
     pipeutil::RpcPipeServer::RequestHandler handler =
-        [py_handler](const pipeutil::Message& req) -> pipeutil::Message {
+        [handler_ref](const pipeutil::Message& req) -> pipeutil::Message {
             PyGILState_STATE gstate = PyGILState_Ensure();
 
             PyObject* py_req = PyMessage_from_message(req);
             pipeutil::Message resp{};
 
             if (py_req) {
-                PyObject* py_resp = PyObject_CallOneArg(py_handler, py_req);
+                // Python 3.8 互換: PyObject_CallOneArg は 3.9+、代替として PyObject_CallFunctionObjArgs
+                PyObject* py_resp = PyObject_CallFunctionObjArgs(
+                    handler_ref.get(), py_req, (PyObject*)NULL);
                 Py_DECREF(py_req);
 
                 if (py_resp) {
@@ -250,43 +261,9 @@ static PyObject* PyRpcPipeServer_serve_requests(PyRpcPipeServer* self,
         pending = new pipeutil::PipeException{e};
     }
     Py_END_ALLOW_THREADS
-
-    // ラムダが背景スレッドで保持されている間は py_handler の参照を維持する必要がある。
-    // フォアグラウンドモードでは serve_loop が戻った時点で lambda が解放される。
-    // 背景モードでは stop()/close() が呼ばれると handler_thread がデストロイされ、
-    // ラムダが解放される（Py_DECREF が GIL を持つスレッドから呼ばれないリスクがある）。
-    // 安全のため: 背景モードではラムダのデストラクト時に GIL を取得して Py_DECREF する。
-    // → 上のラムダが py_handler を DECREF するのは serve_loop 終了後なので、
-    //   ここでは Py_DECREF しない（ラムダ内部のキャプチャに委ねる）。
-    // フォアグラウンドモードでは戻り後にラムダが破棄され py_handler が DECREF される。
-    // ただし C++ のラムダデストラクタは GIL 不在かもしれないため、
-    // フォアグラウンドでも DECREF は明示的に GIL 下で行う。
-    // 解決策: py_handler の DECREF をここで GIL 保持状態で実行し、
-    //         ラムダには生ポインタを渡す（ラムダはコピーを保持しない）。
-    // ※ 上記ラムダはすでに py_handler をキャプチャ済み。
-    //   フォアグラウンドでは BEGIN/END_ALLOW_THREADS 後にラムダは破棄されている。
-    //   背景モードでは handler_thread_ が保持。DECREF はスレッドデストラクト時に
-    //   GIL 不在で呼ばれる可能性があるため、stop() 後にここで DECREF する。
-    // → 実用的なアプローチ: 常にこの時点で Py_DECREF。
-    //   背景モードでラムダが長生きする場合の二重解放を避けるため、
-    //   ラムダ内では INCREF したままにし、ここで一度だけ DECREF する。
-    // 最終判断: py_handler 参照は Py_INCREF 済み。
-    //   ラムダがコピーで py_handler を保持し続けるため、ここでは DECREF しない。
-    //   ラムダが消える（stop() → handler_thread_.join() → ラムダのデストラクタ）
-    //   タイミングで GIL 無しの DECREF が走る問題は、RpcPipeServer::stop() を
-    //   Python 側から呼ぶ際に GIL 解放する（Py_BEGIN_ALLOW_THREADS）ことで回避しているが
-    //   完全ではない。実用上は serve_requests ループ内でのみ handler を呼ぶため、
-    //   GIL 取得済み状態での呼び出しは保証される。
-    // 簡易な安全策: ここで DECREF. ラムダはコピーを持つが、Py_INCREF された参照を
-    //   ラムダが管理するため、ラムダのデストラクタで DECREF が走る。
-    //   GIL を必要とする DECREF が GIL なしで走るリスクがある。
-    // ------------------------------------------------------------------
-    // 採用方針: py_handler 参照カウントを 2 にしてここで明示的に 1 落とす。
-    //   ラムダが消えるタイミングで追加的な DECREF が行われる（問題になり得る場合は
-    //   TODO としてマークする）。
-    //   TODO(F002): Python C API スレッドセーフ DECREF（Py_DECREF at GIL）。
-    // ------------------------------------------------------------------
-    Py_DECREF(py_handler);   // ラムダが参照を保持しているので生存は保証される
+    // handler_ref の shared_ptr はここでスコープを抜け Py_DECREF が GIL 下で実行される
+    // (フォアグラウンドモード)。バックグラウンドモードでは std::move 先の lambda が
+    // 保持し続け、serve_requests 内部スレッドが終了した時点で GIL-safe deleter が動く。
 
     if (pending) { set_python_exception(*pending); delete pending; return nullptr; }
     Py_RETURN_NONE;

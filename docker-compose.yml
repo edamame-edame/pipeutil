@@ -1,0 +1,68 @@
+# docker-compose.yml — pipeutil Linux build + test
+# ─────────────────────────────────────────────────────────────────────────────
+# 使い方（プロジェクトルートから）:
+#
+#   # イメージをビルドする（初回 or Dockerfile 変更時）:
+#   docker compose build linux-builder
+#
+#   # 全バージョン wheel ビルド:
+#   docker compose run --rm linux-build
+#
+#   # 全バージョン pytest（dist/ の wheel を使用）:
+#   docker compose run --rm linux-test
+#
+#   # ビルド + テスト 一括:
+#   docker compose run --rm linux-build-test
+#
+#   # 特定バージョンのみ:
+#   docker compose run --rm -e PY_VERSIONS="3.11 3.14" linux-build
+#   docker compose run --rm -e PY_VERSIONS="3.11 3.14" linux-test
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ─── ベースイメージ定義（直接 run しない）─────────────────────────────
+  linux-builder:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.linux
+    image: pipeutil-linux-builder:latest
+    # プロジェクトルートをコンテナの /project にマウント（wheel は dist/ に書き出される）
+    volumes:
+      - .:/project:z
+    working_dir: /project
+    # デフォルトで何もしない（サブサービスで上書き）
+    command: ["true"]
+
+  # ─── wheel ビルドのみ ─────────────────────────────────────────────────
+  linux-build:
+    extends:
+      service: linux-builder
+    command: ["/usr/local/bin/entrypoint_build.sh"]
+    environment:
+      # 省略時は全バージョン。例: PY_VERSIONS=3.11 3.14
+      PY_VERSIONS: "${PY_VERSIONS:-3.8 3.9 3.10 3.11 3.12 3.13 3.14}"
+
+  # ─── pytest のみ（dist/ の wheel を使用）─────────────────────────────
+  linux-test:
+    extends:
+      service: linux-builder
+    command: ["/usr/local/bin/entrypoint_test.sh"]
+    environment:
+      PY_VERSIONS: "${PY_VERSIONS:-3.8 3.9 3.10 3.11 3.12 3.13 3.14}"
+      PYTEST_ARGS:  "${PYTEST_ARGS:--v --tb=short --timeout=30}"
+
+  # ─── ビルド + テスト 一括 ─────────────────────────────────────────────
+  linux-build-test:
+    extends:
+      service: linux-builder
+    command:
+      - /bin/bash
+      - -c
+      - |
+        /usr/local/bin/entrypoint_build.sh && \
+        /usr/local/bin/entrypoint_test.sh
+    environment:
+      PY_VERSIONS: "${PY_VERSIONS:-3.8 3.9 3.10 3.11 3.12 3.13 3.14}"
+      PYTEST_ARGS:  "${PYTEST_ARGS:--v --tb=short --timeout=30}"

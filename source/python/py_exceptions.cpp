@@ -1,6 +1,7 @@
 // py_exceptions.cpp — Python 例外クラスの定義・登録・変換
 // 仕様: spec/04_python_wrapper.md §3
 
+#include "py_compat.hpp"  // must precede all Python includes; provides 3.8+ shims
 #include "py_exceptions.hpp"
 #include <string>
 

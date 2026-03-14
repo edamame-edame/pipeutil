@@ -1,7 +1,9 @@
 // py_pipe_stats.cpp — PyPipeStats 型実装
 // 仕様: spec/F006_diagnostics_metrics.md §5.1
 
+#include "py_compat.hpp"  // must precede all Python includes; provides 3.8+ shims
 #include "py_pipe_stats.hpp"
+#include <new>             // std::operator new (placement new)
 
 namespace pyutil {
 
@@ -11,7 +13,7 @@ static PyObject* PyPipeStats_new(PyTypeObject* type, PyObject* /*args*/, PyObjec
     PyPipeStats* self = reinterpret_cast<PyPipeStats*>(type->tp_alloc(type, 0));
     if (self) {
         // placement new で PipeStats を値初期化（フィールドを 0 に）
-        new (&self->stats) pipeutil::PipeStats{};
+        new (&self->stats) pipeutil::PipeStats();
     }
     return reinterpret_cast<PyObject*>(self);
 }
@@ -111,7 +113,7 @@ PyObject* PyPipeStats_from_stats(const pipeutil::PipeStats& stats) {
     PyPipeStats* obj = reinterpret_cast<PyPipeStats*>(
         PyPipeStats_Type.tp_alloc(&PyPipeStats_Type, 0));
     if (!obj) return nullptr;
-    new (&obj->stats) pipeutil::PipeStats{stats};
+    new (&obj->stats) pipeutil::PipeStats(stats);
     return reinterpret_cast<PyObject*>(obj);
 }
 

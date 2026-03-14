@@ -18,9 +18,12 @@ namespace pipeutil {
 
 class PipeServer::Impl {
 public:
-    Impl(std::string name, std::size_t buf_size)
+    Impl(std::string name, std::size_t buf_size,
+         PipeAcl acl = PipeAcl::Default, std::string custom_sddl = "")
         : pipe_name_(std::move(name))
         , platform_(std::make_unique<detail::PlatformPipeImpl>(buf_size))
+        , acl_(acl)
+        , custom_sddl_(std::move(custom_sddl))
     {}
 
     /// 内部コンストラクタ: accept 済みの IPlatformPipe を受け取る（MultiPipeServer 専用）
@@ -39,7 +42,7 @@ public:
     {}
 
     void listen() {
-        platform_->server_create(pipe_name_);
+        platform_->server_create(pipe_name_, acl_, custom_sddl_);
     }
 
     void accept(std::chrono::milliseconds timeout) {
@@ -123,6 +126,8 @@ private:
     std::string                                    pipe_name_;
     std::unique_ptr<detail::IPlatformPipe>         platform_;
     std::mutex                                     io_mutex_;  // send/receive 保護
+    PipeAcl                                        acl_;
+    std::string                                    custom_sddl_;
     // ─── 統計カウンタ (F-006) ──────────────────────────────────────────────
     std::atomic<uint64_t> stat_msgs_sent_{0};
     std::atomic<uint64_t> stat_msgs_recv_{0};
@@ -136,8 +141,10 @@ private:
 
 // ─── PipeServer 公開 API ──────────────────────────────────────────
 
-PipeServer::PipeServer(std::string pipe_name, std::size_t buffer_size)
-    : impl_(std::make_unique<Impl>(std::move(pipe_name), buffer_size))
+PipeServer::PipeServer(std::string pipe_name, std::size_t buffer_size,
+                       PipeAcl acl, std::string custom_sddl)
+    : impl_(std::make_unique<Impl>(std::move(pipe_name), buffer_size,
+                                    acl, std::move(custom_sddl)))
 {}
 
 /// MultiPipeServer 専用: accept 済みの IPlatformPipe を保持する PipeServer を構築する

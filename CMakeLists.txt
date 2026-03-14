@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(pipeutil VERSION 0.1.0 LANGUAGES CXX)
+project(pipeutil VERSION 1.0.0 LANGUAGES CXX)
 
 # ─── グローバル設定 ──────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 20)

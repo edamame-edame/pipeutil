@@ -33,7 +33,7 @@ class RpcServerThread(threading.Thread):
         self.accept_timeout = accept_timeout
         self.serve_duration  = serve_duration
         self._ready = threading.Event()
-        self._stop  = threading.Event()
+        self._stop_ev = threading.Event()  # '_stop' は Python 3.8 Thread の内部メソッドと衝突するため回避
         self._exc: BaseException | None = None
         self._srv: pipeutil.RpcPipeServer | None = None
 
@@ -46,7 +46,7 @@ class RpcServerThread(threading.Thread):
             srv.accept(self.accept_timeout)
             srv.serve_requests(self.handler, run_in_background=True)
             # serve_duration 待ってから stop
-            self._stop.wait(self.serve_duration)
+            self._stop_ev.wait(self.serve_duration)
             srv.stop()
         except Exception as e:
             self._exc = e
@@ -58,7 +58,7 @@ class RpcServerThread(threading.Thread):
         assert self._ready.wait(timeout), "RpcServer did not start in time"
 
     def shutdown(self):
-        self._stop.set()
+        self._stop_ev.set()
 
     def reraise(self):
         if self._exc:

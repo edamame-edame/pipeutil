@@ -100,4 +100,12 @@ void set_async_pipe_exception(const pipeutil::PipeException& e) noexcept;
 // g_fire_future_func に PyCFunction オブジェクトをセットする。
 PyObject* fire_future_impl(PyObject* /*module*/, PyObject* args) noexcept;
 
+// ─── Linux ネイティブ I/O コールバック (R-068) ───────────────────────────
+// asyncio SelectorEventLoop の add_reader / add_writer に渡す関数。
+// py_async_module.cpp の _on_linux_readable / _on_linux_writable から呼び出す。
+#ifndef _WIN32
+PyObject* linux_on_readable_handler(PyObject* cap) noexcept;
+PyObject* linux_on_writable_handler(PyObject* cap) noexcept;
+#endif
+
 } // namespace pipeutil::async

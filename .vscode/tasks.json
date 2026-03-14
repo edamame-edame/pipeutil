@@ -1,86 +1,289 @@
 {
 	"version": "2.0.0",
 	"tasks": [
-		// ─── ビルドタスク ──────────────────────────────────────────────
+
+		// ════════════════════════════════════════════════════════════════
+		// Setup: venv 作成 + wheel + test deps インストール
+		// ════════════════════════════════════════════════════════════════
 		{
-			"label": "Build All (CMake + cp313/cp314 wheels)",
+			"label": "Setup: all venvs",
+			"detail": "全 Python バージョン (.venv38 〜 .venv314) を作成し wheel と test deps をインストール",
 			"type": "shell",
-			"command": "cmake --preset vs-release; cmake --build --preset build-release; Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; Remove-Item -Force python\\pipeutil\\_pipeutil*.pyd -ErrorAction SilentlyContinue; .\\.venv313\\Scripts\\python.exe -m build --wheel; Remove-Item -Force python\\pipeutil\\_pipeutil*.pyd -ErrorAction SilentlyContinue; .\\.venv314\\Scripts\\python.exe -m build --wheel",
+			"command": ".\\tools\\setup_venvs.ps1",
 			"options": {
-				"shell": {
-					"executable": "powershell.exe",
-					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
-				}
+				"shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] }
 			},
-			"group": { "kind": "build", "isDefault": true },
+			"group": "build",
 			"problemMatcher": []
 		},
-		// ─── C++ テストタスク ──────────────────────────────────────────
+
+		// ════════════════════════════════════════════════════════════════
+		// Build: バージョン別 wheel ビルド
+		// ════════════════════════════════════════════════════════════════
 		{
-			"label": "Test: Build C++ (vs-test)",
+			"label": "Build: wheel py3.8",
 			"type": "shell",
-			"command": "cmake --preset vs-test; cmake --build --preset build-test",
-			"options": {
-				"shell": {
-					"executable": "powershell.exe",
-					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
-				}
-			},
-			"group": "test",
-			"problemMatcher": ["$msCompile"]
+			"command": "py -3.8  -m pip wheel . -w dist/",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "build", "problemMatcher": []
 		},
 		{
-			"label": "Test: Run C++ (ctest)",
+			"label": "Build: wheel py3.9",
 			"type": "shell",
-			"command": "ctest --preset run-test",
-			"options": {
-				"shell": {
-					"executable": "powershell.exe",
-					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
-				}
-			},
-			"dependsOn": "Test: Build C++ (vs-test)",
-			"group": "test",
-			"problemMatcher": []
-		},
-		// ─── Python テストタスク ───────────────────────────────────────
-		{
-			"label": "Test: Install pipeutil (cp313 wheel)",
-			"type": "shell",
-			"command": "Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue; Remove-Item -Force python\\pipeutil\\_pipeutil*.pyd -ErrorAction SilentlyContinue; .\\.venv313\\Scripts\\python.exe -m build --wheel; .\\.venv313\\Scripts\\pip.exe install --force-reinstall (Get-ChildItem dist\\*.whl | Select-Object -First 1).FullName",
-			"options": {
-				"shell": {
-					"executable": "powershell.exe",
-					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
-				}
-			},
-			"group": "test",
-			"problemMatcher": []
+			"command": "py -3.9  -m pip wheel . -w dist/",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "build", "problemMatcher": []
 		},
 		{
-			"label": "Test: Run Python (pytest)",
+			"label": "Build: wheel py3.10",
 			"type": "shell",
-			"command": ".\\.venv313\\Scripts\\python.exe -m pytest tests/python/ -v --tb=short --timeout=30",
-			"options": {
-				"shell": {
-					"executable": "powershell.exe",
-					"args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
-				}
-			},
-			"dependsOn": "Test: Install pipeutil (cp313 wheel)",
-			"group": "test",
-			"problemMatcher": []
+			"command": "py -3.10 -m pip wheel . -w dist/",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "build", "problemMatcher": []
 		},
-		// ─── 全テスト一括実行 ──────────────────────────────────────────
 		{
-			"label": "Test: Run All (C++ + Python)",
+			"label": "Build: wheel py3.11",
+			"type": "shell",
+			"command": "py -3.11 -m pip wheel . -w dist/",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "build", "problemMatcher": []
+		},
+		{
+			"label": "Build: wheel py3.12",
+			"type": "shell",
+			"command": "py -3.12 -m pip wheel . -w dist/",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "build", "problemMatcher": []
+		},
+		{
+			"label": "Build: wheel py3.13",
+			"type": "shell",
+			"command": "py -3.13 -m pip wheel . -w dist/",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "build", "problemMatcher": []
+		},
+		{
+			"label": "Build: wheel py3.14",
+			"type": "shell",
+			"command": "py -3.14 -m pip wheel . -w dist/",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": { "kind": "build", "isDefault": true }, "problemMatcher": []
+		},
+		{
+			"label": "Build: all wheels",
+			"detail": "全 Python バージョン (3.8〜3.14) の wheel を順次ビルド",
 			"dependsOn": [
-				"Test: Run C++ (ctest)",
-				"Test: Run Python (pytest)"
+				"Build: wheel py3.8",  "Build: wheel py3.9",  "Build: wheel py3.10",
+				"Build: wheel py3.11", "Build: wheel py3.12",
+				"Build: wheel py3.13", "Build: wheel py3.14"
 			],
 			"dependsOrder": "sequence",
-			"group": { "kind": "test", "isDefault": true },
-			"problemMatcher": []
+			"group": "build", "problemMatcher": []
+		},
+
+		// ════════════════════════════════════════════════════════════════
+		// Test: バージョン別 pytest（既存 venv を使用）
+		// ════════════════════════════════════════════════════════════════
+		{
+			"label": "Test: py3.8",
+			"type": "shell",
+			"command": ".\\.venv38\\Scripts\\python.exe  -m pytest tests/python/ -v --tb=short --timeout=30",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Test: py3.9",
+			"type": "shell",
+			"command": ".\\.venv39\\Scripts\\python.exe  -m pytest tests/python/ -v --tb=short --timeout=30",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Test: py3.10",
+			"type": "shell",
+			"command": ".\\.venv310\\Scripts\\python.exe -m pytest tests/python/ -v --tb=short --timeout=30",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Test: py3.11",
+			"type": "shell",
+			"command": ".\\.venv311\\Scripts\\python.exe -m pytest tests/python/ -v --tb=short --timeout=30",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Test: py3.12",
+			"type": "shell",
+			"command": ".\\.venv312\\Scripts\\python.exe -m pytest tests/python/ -v --tb=short --timeout=30",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Test: py3.13",
+			"type": "shell",
+			"command": ".\\.venv313\\Scripts\\python.exe -m pytest tests/python/ -v --tb=short --timeout=30",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Test: py3.14",
+			"type": "shell",
+			"command": ".\\.venv314\\Scripts\\python.exe -m pytest tests/python/ -v --tb=short --timeout=30",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Test: all Python versions",
+			"detail": "3.8〜3.14 の全 venv で pytest を順次実行（パイプ競合を避けるため sequential）",
+			"dependsOn": [
+				"Test: py3.8",  "Test: py3.9",  "Test: py3.10",
+				"Test: py3.11", "Test: py3.12",
+				"Test: py3.13", "Test: py3.14"
+			],
+			"dependsOrder": "sequence",
+			"group": { "kind": "test", "isDefault": true }, "problemMatcher": []
+		},
+
+		// ════════════════════════════════════════════════════════════════
+		// Build + Test: バージョン別（wheel ビルド → venv 更新 → pytest）
+		// ════════════════════════════════════════════════════════════════
+		{
+			"label": "Build+Test: py3.8",
+			"type": "shell",
+			"command": ".\\tools\\build_test.ps1 -PyVersion 3.8  -CpTag cp38  -VenvDir .venv38",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Build+Test: py3.9",
+			"type": "shell",
+			"command": ".\\tools\\build_test.ps1 -PyVersion 3.9  -CpTag cp39  -VenvDir .venv39",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Build+Test: py3.10",
+			"type": "shell",
+			"command": ".\\tools\\build_test.ps1 -PyVersion 3.10 -CpTag cp310 -VenvDir .venv310",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Build+Test: py3.11",
+			"type": "shell",
+			"command": ".\\tools\\build_test.ps1 -PyVersion 3.11 -CpTag cp311 -VenvDir .venv311",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Build+Test: py3.12",
+			"type": "shell",
+			"command": ".\\tools\\build_test.ps1 -PyVersion 3.12 -CpTag cp312 -VenvDir .venv312",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Build+Test: py3.13",
+			"type": "shell",
+			"command": ".\\tools\\build_test.ps1 -PyVersion 3.13 -CpTag cp313 -VenvDir .venv313",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Build+Test: py3.14",
+			"type": "shell",
+			"command": ".\\tools\\build_test.ps1 -PyVersion 3.14 -CpTag cp314 -VenvDir .venv314",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Build+Test: all Python versions",
+			"detail": "全バージョン wheel ビルド → venv 更新 → pytest を順次実行",
+			"dependsOn": [
+				"Build+Test: py3.8",  "Build+Test: py3.9",  "Build+Test: py3.10",
+				"Build+Test: py3.11", "Build+Test: py3.12",
+				"Build+Test: py3.13", "Build+Test: py3.14"
+			],
+			"dependsOrder": "sequence",
+			"group": "test", "problemMatcher": []
+		},
+
+		// ════════════════════════════════════════════════════════════════
+		// C++ テスト
+		// ════════════════════════════════════════════════════════════════
+		{
+			"label": "C++: build tests",
+			"type": "shell",
+			"command": "cmake --preset vs-test; cmake --build --preset build-test",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": ["$msCompile"]
+		},
+		{
+			"label": "C++: run tests (ctest)",
+			"type": "shell",
+			"command": "ctest --preset run-test",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"dependsOn": "C++: build tests",
+			"group": "test", "problemMatcher": []
+		},
+
+		// ════════════════════════════════════════════════════════════════
+		// 全体: C++ + 全 Python
+		// ════════════════════════════════════════════════════════════════
+		{
+			"label": "All: build+test (C++ + all Python)",
+			"detail": "C++ ctest + 全 Python バージョン pytest を順次実行",
+			"dependsOn": [
+				"C++: run tests (ctest)",
+				"Test: all Python versions"
+			],
+			"dependsOrder": "sequence",
+			"group": "test", "problemMatcher": []
+		},
+
+		// ════════════════════════════════════════════════════════════════
+		// Linux (Docker): ビルド / テスト / ビルド+テスト
+		// ════════════════════════════════════════════════════════════════
+		{
+			"label": "Linux: build image",
+			"detail": "Docker イメージ pipeutil-linux-builder をビルド／再ビルドする",
+			"type": "shell",
+			"command": "docker compose build linux-builder",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "build", "problemMatcher": []
+		},
+		{
+			"label": "Linux: build wheels",
+			"detail": "Docker コンテナ内で cp38〜cp314 の manylinux wheel をビルドして dist/ に出力",
+			"type": "shell",
+			"command": ".\\tools\\linux_build_test.ps1 -Mode build",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "build", "problemMatcher": []
+		},
+		{
+			"label": "Linux: run tests",
+			"detail": "Docker コンテナ内で cp38〜cp314 の pytest を実行（dist/ の wheel を使用）",
+			"type": "shell",
+			"command": ".\\tools\\linux_build_test.ps1 -Mode test",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Linux: build+test",
+			"detail": "Docker コンテナ内で wheel ビルド → pytest を全バージョン一括実行",
+			"type": "shell",
+			"command": ".\\tools\\linux_build_test.ps1 -Mode build-test",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
+		},
+		{
+			"label": "Linux: rebuild image + build+test",
+			"detail": "Docker イメージ再ビルド → wheel ビルド → pytest（Dockerfile 変更後に使用）",
+			"type": "shell",
+			"command": ".\\tools\\linux_build_test.ps1 -Mode rebuild",
+			"options": { "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] } },
+			"group": "test", "problemMatcher": []
 		}
 	]
 }

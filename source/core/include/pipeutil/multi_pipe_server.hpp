@@ -3,6 +3,7 @@
 #pragma once
 
 #include "pipeutil_export.hpp"
+#include "pipe_acl.hpp"
 #include "pipe_server.hpp"
 #include "pipe_stats.hpp"
 #include <cstddef>
@@ -37,9 +38,13 @@ public:
     /// pipe_name      : パイプ識別名（PipeServer の論理名と同じ書式）
     /// max_connections: 同時接続数の上限（1 以上 64 以下）
     /// buffer_size    : 各接続の内部バッファサイズ（デフォルト 64 KiB）
+    /// acl            : アクセス制御レベル（デフォルト: OS デフォルト，後方互換）
+    /// custom_sddl    : PipeAcl::Custom 指定時の SDDL 文字列（Windows のみ有効）
     explicit MultiPipeServer(std::string pipe_name,
                              std::size_t max_connections = 8,
-                             std::size_t buffer_size    = 65536);
+                             std::size_t buffer_size     = 65536,
+                             PipeAcl     acl             = PipeAcl::Default,
+                             std::string custom_sddl     = "");
 
     // コピー・ムーブ禁止（acceptor スレッドが self を参照するため）
     MultiPipeServer(const MultiPipeServer&)            = delete;

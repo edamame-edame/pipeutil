@@ -31,7 +31,7 @@ class EchoRpcServer(threading.Thread):
         super().__init__(daemon=True)
         self.pipe_name = pipe_name
         self._ready = threading.Event()
-        self._stop = threading.Event()
+        self._stop_ev = threading.Event()  # '_stop' は Python 3.8 Thread の内部メソッドと衝突するため回避
         self._srv: pipeutil.RpcPipeServer | None = None
 
     def run(self):
@@ -41,7 +41,7 @@ class EchoRpcServer(threading.Thread):
         self._ready.set()
         srv.accept(5.0)
         srv.serve_requests(lambda req: req, run_in_background=True)
-        self._stop.wait(10.0)
+        self._stop_ev.wait(10.0)
         srv.stop()
         srv.close()
 
@@ -49,7 +49,7 @@ class EchoRpcServer(threading.Thread):
         assert self._ready.wait(timeout), "RpcPipeServer did not start"
 
     def shutdown(self):
-        self._stop.set()
+        self._stop_ev.set()
         self.join(timeout=5.0)
 
 

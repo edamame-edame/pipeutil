@@ -1,0 +1,2 @@
+id,severity,category,status,summary,location
+N/A,Info,Review-Result,Closed,F-001〜F-008 を MECE 観点（API/実装/テスト/CI/プラットフォーム）で静的照合し新規指摘なし,docs/feature_proposals_v0.2.md;spec/F001_multi_pipe_server.md;spec/F002_rpc_message_id.md;spec/F003_reconnecting_pipe_client.md;spec/F004_async_threading_multiprocessing.md;spec/F004p2_async_native.md;spec/F005_structured_message.md;spec/F006_diagnostics_metrics.md;spec/F008_security_acl.md

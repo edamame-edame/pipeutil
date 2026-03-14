@@ -790,6 +790,10 @@ bool AsyncPlatformPipe::is_connected() const noexcept {
 // Linux POSIX 実装
 // ──────────────────────────────────────────────────────────────────────────────
 
+// LinuxReadCtx / LinuxWriteCtx が owner_impl フィールド（R-076）で参照するため
+// anonymous namespace より前に前方宣言しておく。
+struct AsyncPlatformPipe::Impl;
+
 namespace {
 
 /// UNIX ソケットパスを生成（/tmp/pipeutil_<name>.sock）
@@ -808,6 +812,8 @@ struct LinuxReadCtx {
     std::size_t hdr_read     = 0;
     std::size_t payload_read = 0;
     bool        header_done  = false;
+    // I/O 完了後に active_read_cap_ をクリアするためのバックポインタ（R-076）
+    AsyncPlatformPipe::Impl* owner_impl = nullptr;
 
     LinuxReadCtx(int f, PyObject* l, PyObject* fut)
         : fd(f), loop_obj(l), future_obj(fut) {}
@@ -824,6 +830,8 @@ struct LinuxWriteCtx {
     PyObject*  future_obj;
     std::vector<std::byte> frame_buf;
     std::size_t written = 0;
+    // I/O 完了後に active_write_cap_ をクリアするためのバックポインタ（R-076）
+    AsyncPlatformPipe::Impl* owner_impl = nullptr;
 
     LinuxWriteCtx(int f, PyObject* l, PyObject* fut)
         : fd(f), loop_obj(l), future_obj(fut) {}
@@ -970,6 +978,7 @@ void AsyncPlatformPipe::async_read_frame(PyObject* loop, PyObject* future) {
     Py_INCREF(loop);
     Py_INCREF(future);
     auto* ctx = new LinuxReadCtx{impl_->sock_fd_, loop, future};
+    ctx->owner_impl = impl_.get();
     impl_->active_read_cap_ = PyCapsule_New(ctx, "lrc", linux_read_ctx_dealloc);
 
     // loop.add_reader(fd, g_on_readable_func, capsule)
@@ -1004,6 +1013,7 @@ void AsyncPlatformPipe::async_write_frame(
     Py_INCREF(loop);
     Py_INCREF(future);
     auto* ctx = new LinuxWriteCtx{impl_->sock_fd_, loop, future};
+    ctx->owner_impl = impl_.get();
     ctx->frame_buf.resize(sizeof(pipeutil::detail::FrameHeader) + size);
 
     pipeutil::detail::FrameHeader hdr{};
@@ -1032,6 +1042,8 @@ void AsyncPlatformPipe::async_write_frame(
 
 void AsyncPlatformPipe::cancel() noexcept {
     // asyncio スレッド上で呼ばれる（GIL 保持中）
+
+    // ── 読み取り側のキャンセル ───────────────────────────────────────────────
     if (impl_->active_read_cap_ && impl_->sock_fd_ >= 0) {
         // (R-054) loop_obj は LinuxReadCtx capsule から取得する。
         // nullptr を PyObject_CallMethodObjArgs に渡すと未定義動作によるクラッシュを引き起こす。
@@ -1049,6 +1061,23 @@ void AsyncPlatformPipe::cancel() noexcept {
         }
         Py_CLEAR(impl_->active_read_cap_);
     }
+
+    // ── 書き込み側のキャンセル（R-078）─────────────────────────────────────
+    if (impl_->active_write_cap_ && impl_->sock_fd_ >= 0) {
+        auto* ctx = static_cast<LinuxWriteCtx*>(
+            PyCapsule_GetPointer(impl_->active_write_cap_, "lwc"));
+        if (ctx && ctx->loop_obj) {
+            PyObject* fd_obj = PyLong_FromLong(impl_->sock_fd_);
+            if (fd_obj) {
+                PyObject* ret = PyObject_CallMethodObjArgs(
+                    ctx->loop_obj, g_str_remove_writer, fd_obj, nullptr);
+                if (!ret) PyErr_Clear();
+                Py_XDECREF(ret);
+                Py_DECREF(fd_obj);
+            }
+        }
+        Py_CLEAR(impl_->active_write_cap_);
+    }
 }
 
 void AsyncPlatformPipe::close() noexcept {
@@ -1064,6 +1093,253 @@ bool AsyncPlatformPipe::is_connected() const noexcept {
 }
 
 #endif // _WIN32
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Linux ネイティブ I/O コールバック実装 (R-068)
+// asyncio の SelectorEventLoop が add_reader / add_writer に渡す関数。
+// GIL は asyncio スレッドが保持した状態で呼ばれる（R-046 に準拠）。
+// ──────────────────────────────────────────────────────────────────────────────
+#ifndef _WIN32
+
+namespace {
+
+/// readable 完了時: remove_reader → active_read_cap_ クリア → future に成功通知
+static void linux_finish_read(
+    LinuxReadCtx* ctx, const std::byte* data, std::size_t size) noexcept
+{
+    PyObject* loop = ctx->loop_obj;
+    PyObject* fut  = ctx->future_obj;
+    ctx->loop_obj   = nullptr;  // デストラクタでの二重 DECREF を防ぐ
+    ctx->future_obj = nullptr;
+    // asyncio ループから fd の監視を解除する
+    PyObject* fd_obj = PyLong_FromLong(ctx->fd);
+    if (fd_obj) {
+        PyObject* r = PyObject_CallMethodObjArgs(
+            loop, g_str_remove_reader, fd_obj, nullptr);
+        if (!r) PyErr_Clear();
+        Py_XDECREF(r);
+        Py_DECREF(fd_obj);
+    }
+    // schedule_fire_success を先に呼ぶ（data は ctx->payload の内部ポインタのため、
+    // ctx 解放前に PyBytes_FromStringAndSize でコピーする必要がある）。
+    schedule_fire_success(loop, fut, data, size);
+    // active_read_cap_ をクリアして再入ガードを解除する（R-076）
+    // future への通知が完了した後で capsule を DECREF → delete ctx する。
+    if (ctx->owner_impl) {
+        PyObject* cap = ctx->owner_impl->active_read_cap_;
+        ctx->owner_impl->active_read_cap_ = nullptr;
+        Py_XDECREF(cap);  // → linux_read_ctx_dealloc → delete ctx
+    }
+}
+
+/// readable エラー時: remove_reader → active_read_cap_ クリア → future に例外通知
+static void linux_finish_read_err(
+    LinuxReadCtx* ctx, pipeutil::PipeErrorCode code, const char* msg) noexcept
+{
+    PyObject* loop = ctx->loop_obj;
+    PyObject* fut  = ctx->future_obj;
+    ctx->loop_obj   = nullptr;
+    ctx->future_obj = nullptr;
+    PyObject* fd_obj = PyLong_FromLong(ctx->fd);
+    if (fd_obj) {
+        PyObject* r = PyObject_CallMethodObjArgs(
+            loop, g_str_remove_reader, fd_obj, nullptr);
+        if (!r) PyErr_Clear();
+        Py_XDECREF(r);
+        Py_DECREF(fd_obj);
+    }
+    // active_read_cap_ をクリアして再入ガードを解除する（R-076）
+    // schedule_fire_error の msg は文字列リテラルのため解放後も安全だが、
+    // 統一性のため schedule を先に呼ぶ。
+    schedule_fire_error(loop, fut, code, msg);
+    if (ctx->owner_impl) {
+        PyObject* cap = ctx->owner_impl->active_read_cap_;
+        ctx->owner_impl->active_read_cap_ = nullptr;
+        Py_XDECREF(cap);  // → linux_read_ctx_dealloc → delete ctx
+    }
+}
+
+/// writable 完了 / エラー時: remove_writer → active_write_cap_ クリア → future に通知
+static void linux_finish_write(
+    LinuxWriteCtx* ctx, bool success, const char* err_msg) noexcept
+{
+    PyObject* loop = ctx->loop_obj;
+    PyObject* fut  = ctx->future_obj;
+    ctx->loop_obj   = nullptr;
+    ctx->future_obj = nullptr;
+    PyObject* fd_obj = PyLong_FromLong(ctx->fd);
+    if (fd_obj) {
+        PyObject* r = PyObject_CallMethodObjArgs(
+            loop, g_str_remove_writer, fd_obj, nullptr);
+        if (!r) PyErr_Clear();
+        Py_XDECREF(r);
+        Py_DECREF(fd_obj);
+    }
+    // schedule_fire_* を先に呼ぶ（err_msg は文字列リテラルのため安全）。
+    if (success) {
+        schedule_fire_success(loop, fut, nullptr, 0);
+    } else {
+        schedule_fire_error(loop, fut, pipeutil::PipeErrorCode::BrokenPipe, err_msg);
+    }
+    // active_write_cap_ をクリアして再入ガードを解除する（R-076）
+    if (ctx->owner_impl) {
+        PyObject* cap = ctx->owner_impl->active_write_cap_;
+        ctx->owner_impl->active_write_cap_ = nullptr;
+        Py_XDECREF(cap);  // → linux_write_ctx_dealloc → delete ctx
+    }
+}
+
+} // anonymous namespace
+
+/// asyncio の add_reader コールバック: fd が readable なときに毎回呼ばれる。
+/// ヘッダー→ペイロードを段階的に読み取り、全受信完了で future を resolve する。
+PyObject* linux_on_readable_handler(PyObject* cap) noexcept {
+    if (!PyCapsule_CheckExact(cap)) {
+        PyErr_SetString(PyExc_TypeError, "expected LinuxReadCtx capsule");
+        return nullptr;
+    }
+    auto* ctx = static_cast<LinuxReadCtx*>(PyCapsule_GetPointer(cap, "lrc"));
+    if (!ctx) return nullptr;
+
+    // ─── ヘッダー読み取りフェーズ ───────────────────────────────────
+    if (!ctx->header_done) {
+        const std::size_t remaining =
+            sizeof(pipeutil::detail::FrameHeader) - ctx->hdr_read;
+        const ssize_t n = ::read(
+            ctx->fd,
+            ctx->hdr_raw + ctx->hdr_read,
+            remaining);
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                Py_RETURN_NONE;  // データ未着 → 再待機
+            }
+            linux_finish_read_err(
+                ctx, pipeutil::PipeErrorCode::BrokenPipe, "header read() failed");
+            Py_RETURN_NONE;
+        }
+        if (n == 0) {
+            linux_finish_read_err(
+                ctx, pipeutil::PipeErrorCode::BrokenPipe, "connection closed (EOF on header)");
+            Py_RETURN_NONE;
+        }
+        ctx->hdr_read += static_cast<std::size_t>(n);
+        if (ctx->hdr_read < sizeof(pipeutil::detail::FrameHeader)) {
+            Py_RETURN_NONE;  // ヘッダー部分受信 → 再待機
+        }
+        // ヘッダー完成: magic / version 検証
+        std::memcpy(&ctx->hdr, ctx->hdr_raw, sizeof(ctx->hdr));
+        if (std::memcmp(ctx->hdr.magic, pipeutil::detail::MAGIC, 4) != 0) {
+            linux_finish_read_err(
+                ctx, pipeutil::PipeErrorCode::InvalidMessage, "invalid frame magic");
+            Py_RETURN_NONE;
+        }
+        if (ctx->hdr.version != pipeutil::detail::PROTOCOL_VERSION) {
+            linux_finish_read_err(
+                ctx, pipeutil::PipeErrorCode::InvalidMessage,
+                "unsupported protocol version");
+            Py_RETURN_NONE;
+        }
+        const uint32_t psz =
+            pipeutil::detail::from_le32(ctx->hdr.payload_size);
+        // R-077: Windows実装と同じ上限値で宣言不可能な大フレームを拒否する
+        if (psz > 0x7FFFFFFFu) {
+            linux_finish_read_err(
+                ctx, pipeutil::PipeErrorCode::Overflow, "payload_size exceeds limit");
+            Py_RETURN_NONE;
+        }
+        if (psz == 0) {
+            // ゼロペイロード → 即完了
+            linux_finish_read(ctx, nullptr, 0);
+            Py_RETURN_NONE;
+        }
+        ctx->payload.resize(psz);
+        ctx->header_done = true;
+    }
+
+    // ─── ペイロード読み取りフェーズ ─────────────────────────────────
+    {
+        const std::size_t remaining = ctx->payload.size() - ctx->payload_read;
+        const ssize_t n = ::read(
+            ctx->fd,
+            reinterpret_cast<char*>(ctx->payload.data()) + ctx->payload_read,
+            remaining);
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                Py_RETURN_NONE;
+            }
+            linux_finish_read_err(
+                ctx, pipeutil::PipeErrorCode::BrokenPipe, "payload read() failed");
+            Py_RETURN_NONE;
+        }
+        if (n == 0) {
+            linux_finish_read_err(
+                ctx, pipeutil::PipeErrorCode::BrokenPipe,
+                "connection closed (EOF on payload)");
+            Py_RETURN_NONE;
+        }
+        ctx->payload_read += static_cast<std::size_t>(n);
+        if (ctx->payload_read < ctx->payload.size()) {
+            Py_RETURN_NONE;  // ペイロード部分受信 → 再待機
+        }
+    }
+
+    // ─── CRC-32C 検証 ────────────────────────────────────────────────
+    // R-077: checksum==0 のスキップを廃止。Windows 実装と同様、
+    //        常に CRC を検証する（送信側も常に CRC を計算して送信する）。
+    {
+        const uint32_t expected_crc =
+            pipeutil::detail::from_le32(ctx->hdr.checksum);
+        const uint32_t actual_crc =
+            crc32c_compute(ctx->payload.data(), ctx->payload.size());
+        if (actual_crc != expected_crc) {
+            linux_finish_read_err(
+                ctx, pipeutil::PipeErrorCode::InvalidMessage, "CRC mismatch");
+            Py_RETURN_NONE;
+        }
+    }
+
+    // ─── 全受信完了 ──────────────────────────────────────────────────
+    linux_finish_read(ctx, ctx->payload.data(), ctx->payload.size());
+    Py_RETURN_NONE;
+}
+
+/// asyncio の add_writer コールバック: fd が writable なときに毎回呼ばれる。
+/// frame_buf を残りバイト数ずつ書き込み、全送信完了で future を resolve する。
+PyObject* linux_on_writable_handler(PyObject* cap) noexcept {
+    if (!PyCapsule_CheckExact(cap)) {
+        PyErr_SetString(PyExc_TypeError, "expected LinuxWriteCtx capsule");
+        return nullptr;
+    }
+    auto* ctx = static_cast<LinuxWriteCtx*>(PyCapsule_GetPointer(cap, "lwc"));
+    if (!ctx) return nullptr;
+
+    const std::size_t remaining = ctx->frame_buf.size() - ctx->written;
+    const ssize_t n = ::write(
+        ctx->fd,
+        ctx->frame_buf.data() + ctx->written,
+        remaining);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            Py_RETURN_NONE;  // 送信バッファ満杯 → 再待機
+        }
+        linux_finish_write(ctx, false, "write() failed");
+        Py_RETURN_NONE;
+    }
+    if (n == 0) {
+        linux_finish_write(ctx, false, "connection closed (write returned 0)");
+        Py_RETURN_NONE;
+    }
+    ctx->written += static_cast<std::size_t>(n);
+    if (ctx->written < ctx->frame_buf.size()) {
+        Py_RETURN_NONE;  // 部分送信 → 再待機
+    }
+
+    // ─── 全送信完了 ──────────────────────────────────────────────────
+    linux_finish_write(ctx, true, nullptr);
+    Py_RETURN_NONE;
+}
+
+#endif // !_WIN32
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ──────────────────────────────────────────────────────────────────────────────

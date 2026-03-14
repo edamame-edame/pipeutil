@@ -4,6 +4,7 @@
 #ifndef _WIN32
 
 #include "pipeutil/detail/platform_pipe.hpp"
+#include "pipeutil/pipe_acl.hpp"
 #include <memory>
 #include <string>
 
@@ -20,7 +21,9 @@ public:
     PosixPipe& operator=(PosixPipe&&)      = delete;
 
     // サーバー操作
-    void server_create(const std::string& pipe_name) override;
+    void server_create(const std::string& pipe_name,
+                       pipeutil::PipeAcl acl,
+                       const std::string& custom_sddl) override;
     void server_accept(int64_t timeout_ms)            override;
     std::unique_ptr<IPlatformPipe> server_accept_and_fork(int64_t timeout_ms) override;
     void stop_accept() noexcept                       override;

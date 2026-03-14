@@ -4,6 +4,8 @@
 
 from ._pipeutil import (       # noqa: F401 — re-export
     Message,
+    PipeAcl,
+    PipeStats,
     PipeServer,
     PipeClient,
     MultiPipeServer,
@@ -59,6 +61,8 @@ from .reconnecting_client import (  # noqa: F401
 __all__ = [
     # ─── コア（C 拡張） ───────────────────────────────────────────────
     "Message",
+    "PipeAcl",
+    "PipeStats",
     "PipeServer",
     "PipeClient",
     "MultiPipeServer",
@@ -96,4 +100,4 @@ __all__ = [
     "MaxRetriesExceededError",
 ]
 
-__version__: str = "0.5.0"
+__version__: str = "1.0.0"

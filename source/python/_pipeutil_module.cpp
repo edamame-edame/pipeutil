@@ -4,8 +4,7 @@
 // ADD_OBJECT_OR_FAIL マクロ: PyModule_AddObjectRef の戻り値を検査し、
 //   失敗時にモジュールを DECREF して nullptr を返す（R-010 対応済み）。
 
-#define PY_SSIZE_T_CLEAN
-#include <Python.h>
+#include "py_compat.hpp"  // must precede all Python includes; provides 3.8+ shims
 
 #include "py_message.hpp"
 #include "py_pipe_server.hpp"
@@ -43,6 +42,11 @@ static PyModuleDef pipeutil_module_def = {
         }                                                         \
     } while (0)
 
+// Python 3.8: PyMODINIT_FUNC = "extern \"C\" PyObject*" (no visibility attr).
+// -fvisibility=hidden が CMake MODULE ターゲットに付くため pragma で明示エクスポート。
+#ifdef __GNUC__
+#  pragma GCC visibility push(default)
+#endif
 PyMODINIT_FUNC PyInit__pipeutil(void) {
     // 1. 型オブジェクトの準備（継承ツリーを設定）
     if (PyType_Ready(&pyutil::PyMessage_Type)         < 0) return nullptr;
@@ -79,13 +83,42 @@ PyMODINIT_FUNC PyInit__pipeutil(void) {
         return nullptr;
     }
 
+    // 5. PipeAcl 定数を SimpleNamespace として公開
+    //    使用例: pipeutil.PipeAcl.Default / LocalSystem / Everyone / Custom
+    {
+        PyObject* types_mod = PyImport_ImportModule("types");
+        if (!types_mod) { Py_DECREF(m); return nullptr; }
+        PyObject* sns_cls = PyObject_GetAttrString(types_mod, "SimpleNamespace");
+        Py_DECREF(types_mod);
+        if (!sns_cls) { Py_DECREF(m); return nullptr; }
+
+        PyObject* kwds = Py_BuildValue("{s:i,s:i,s:i,s:i}",
+            "Default",     0,
+            "LocalSystem", 1,
+            "Everyone",    2,
+            "Custom",      3);
+        PyObject* empty_args = PyTuple_New(0);
+        PyObject* acl_ns = (kwds && empty_args)
+            ? PyObject_Call(sns_cls, empty_args, kwds)
+            : nullptr;
+        Py_DECREF(sns_cls);
+        Py_XDECREF(kwds);
+        Py_XDECREF(empty_args);
+        if (!acl_ns) { Py_DECREF(m); return nullptr; }
+        ADD_OBJECT_OR_FAIL(m, "PipeAcl", acl_ns);
+        Py_DECREF(acl_ns);
+    }
+
     // 5. バージョン定数
-    if (PyModule_AddStringConstant(m, "__version__", "0.1.0") < 0) {
+    if (PyModule_AddStringConstant(m, "__version__", "1.0.0") < 0) {
         Py_DECREF(m);
         return nullptr;
     }
 
     return m;
 }
+#ifdef __GNUC__
+#  pragma GCC visibility pop
+#endif
 
 #undef ADD_OBJECT_OR_FAIL

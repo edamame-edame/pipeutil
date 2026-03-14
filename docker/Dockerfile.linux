@@ -1,0 +1,30 @@
+# docker/Dockerfile.linux
+#
+# manylinux_2_28 ベースの Linux ビルド + テスト環境
+# ─────────────────────────────────────────────────────────────────────────────
+# manylinux_2_28 (glibc 2.28+) は AlmaLinux 8 ベースで
+#   - cpython 3.8 〜 3.14 がプリインストール済み (/opt/python/cp3X-cp3X/)
+#   - gcc 12 / CMake / Ninja がプリインストール済み
+# ──────────────────────────────────────────────────────────────────────────────
+FROM quay.io/pypa/manylinux_2_28_x86_64
+
+LABEL maintainer="pipeutil contributors"
+LABEL description="Linux build + test environment for pipeutil (cp38-cp314)"
+
+# ─── 追加ビルドツール ─────────────────────────────────────────────────────
+# CMake は manylinux イメージに含まれるが念のため最新版を保証する
+RUN yum install -y ninja-build && \
+    /opt/python/cp313-cp313/bin/pip install --quiet --upgrade cmake && \
+    ln -sf /opt/python/cp313-cp313/bin/cmake /usr/local/bin/cmake
+
+# ─── 作業ディレクトリ ─────────────────────────────────────────────────────
+WORKDIR /project
+
+# entrypoint スクリプトをコピーして実行可能に
+COPY docker/entrypoint_build.sh /usr/local/bin/entrypoint_build.sh
+COPY docker/entrypoint_test.sh  /usr/local/bin/entrypoint_test.sh
+RUN chmod +x /usr/local/bin/entrypoint_build.sh \
+             /usr/local/bin/entrypoint_test.sh
+
+# デフォルトコマンド: build + test
+CMD ["/usr/local/bin/entrypoint_build.sh"]

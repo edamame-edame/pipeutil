@@ -3,6 +3,7 @@
 
 #include "pipeutil_export.hpp"
 #include "message.hpp"
+#include "pipe_acl.hpp"
 #include "pipe_stats.hpp"
 #include <chrono>
 #include <memory>
@@ -25,10 +26,14 @@ namespace detail { class IPlatformPipe; struct SessionStats; }  // 前方宣言
 // ──────────────────────────────────────────────────────────────────────────────
 class PIPEUTIL_API PipeServer {
 public:
-    /// pipe_name : パイプ識別名（論理名。OS プレフィックスなし）
-    /// buffer_size: 内部 IOBuffer のサイズ（デフォルト 64 KiB）
+    /// pipe_name   : パイプ識別名（論理名。OS プレフィックスなし）
+    /// buffer_size : 内部 IOBuffer のサイズ（デフォルト 64 KiB）
+    /// acl         : アクセス制御レベル（デフォルト: OS デフォルト，後方互換）
+    /// custom_sddl : PipeAcl::Custom 指定時の SDDL 文字列（Windows のみ有効）
     explicit PipeServer(std::string pipe_name,
-                        std::size_t buffer_size = 65536);
+                        std::size_t buffer_size  = 65536,
+                        PipeAcl     acl          = PipeAcl::Default,
+                        std::string custom_sddl  = "");
 
     PipeServer(const PipeServer&)            = delete;
     PipeServer& operator=(const PipeServer&) = delete;

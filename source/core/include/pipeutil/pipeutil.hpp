@@ -1,6 +1,7 @@
 // pipeutil.hpp — pipeutil ライブラリのオールインワンインクルード
 #pragma once
 
+#include "pipeutil/pipe_acl.hpp"
 #include "pipeutil/pipe_stats.hpp"
 #include "pipeutil/pipe_error.hpp"
 #include "pipeutil/message.hpp"

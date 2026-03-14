@@ -1,0 +1,4 @@
+﻿ID,Severity,Category,File,Section,指摘,影響,根拠,Status
+B-001,Low,Build,source/core/include/pipeutil/detail/session_stats.hpp,配置,"session_stats.hpp が公開ヘッダー Dir (include/pipeutil/detail/) に置かれており、src/detail/ のプライベートパスからインクルード不可","ビルドエラー (C1083)","内部実装専用ファイルのためプライベート Dir に配置すべき",Resolved
+B-002,Low,Build,source/core/src/rpc_pipe_server.cpp,L31,"server_create() の呼び出しが F-008 変更前の 1 引数シグネチャのまま","ビルドエラー (C2660)","IPlatformPipe::server_create は F-008 で (name, acl, sddl) の 3 引数に変更済み",Resolved
+B-003,Low,Test,tests/cpp/test_security_acl.cpp,L79/L117/L137,"Message::text() は存在しない — 正しくは as_string_view()","ビルドエラー (C2039)","message.hpp の API は as_string_view() であり text() は定義されていない",Resolved

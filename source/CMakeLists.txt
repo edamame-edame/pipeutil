@@ -6,6 +6,6 @@ option(PIPEUTIL_WITH_ASYNC
 )
 
 if(PIPEUTIL_BUILD_PYTHON)
-    find_package(Python3 3.13 REQUIRED COMPONENTS Interpreter Development.Module)
+    find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter Development.Module)
     add_subdirectory(python)
 endif()

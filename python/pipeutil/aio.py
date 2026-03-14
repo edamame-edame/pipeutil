@@ -20,10 +20,10 @@ from . import Message, PipeClient, PipeServer, RpcPipeClient, RpcPipeServer
 # 仕様: spec/F004p2_async_native.md §6.1
 try:
     from ._aio_native import NativeAsyncPipe as _NativeAsyncPipe
-    import sys as _sys
-    # (R-053) Linux 実装は v0.5.0 では未完成（NotImplementedError スタブ）のため、
-    # Windows 以外では Phase 1 (to_thread) バックエンドへフォールバックする。
-    _NATIVE_BACKEND: bool = (_sys.platform == "win32")
+    # (R-068) Linux コールバック (_on_linux_readable / _on_linux_writable) が実装完了したため、
+    # import 成功時は Windows / Linux を問わず native backend を有効化する。
+    # （R-053 で設けた _sys.platform == "win32" ゲートを撤廃）
+    _NATIVE_BACKEND: bool = True
 except ImportError:
     _NATIVE_BACKEND = False
 

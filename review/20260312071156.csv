@@ -1,0 +1,2 @@
+id,severity,category,status,summary,location
+N/A,Info,Review-Result,Closed,今回再レビューで新規指摘なし（R-078/R-079 の修正反映を確認）,source/python/py_async_pipe.cpp;review/whole.md

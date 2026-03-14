@@ -1,6 +1,7 @@
 // detail/platform_pipe.hpp — プラットフォーム抽象化インタフェース
 #pragma once
 
+#include "pipeutil/pipe_acl.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -24,8 +25,12 @@ public:
     // ─── サーバー操作 ─────────────────────────────────────────────────
 
     /// パイプ/ソケットを作成し接続受付可能状態にする
-    /// 例外: PipeException (SystemError / AccessDenied)
-    virtual void server_create(const std::string& pipe_name) = 0;
+    /// acl        : アクセス制御レベル（PipeAcl::Default で後方互換）
+    /// custom_sddl: PipeAcl::Custom のときのみ参照される SDDL 文字列（Linux では無視）
+    /// 例外: PipeException (SystemError / AccessDenied / InvalidArgument)
+    virtual void server_create(const std::string& pipe_name,
+                               PipeAcl acl,
+                               const std::string& custom_sddl) = 0;
 
     /// クライアント接続を待機する（ブロッキング）
     /// timeout_ms == 0 → 無限待機

@@ -9,6 +9,7 @@
 #  define NOMINMAX
 #endif
 #include <windows.h>
+#include <sddl.h>   // ConvertStringSecurityDescriptorToSecurityDescriptorW (Advapi32)
 
 // デバッグログ: ビルド時に -DPIPEUTIL_DEBUG_LOG を渡すと有効。リリースでは何も生成しない。
 #ifdef PIPEUTIL_DEBUG_LOG
@@ -80,7 +81,70 @@ std::wstring Win32Pipe::to_pipe_path(const std::string& name) {
 
 // ─── サーバー操作 ─────────────────────────────────────────────────
 
-void Win32Pipe::server_create(const std::string& pipe_name) {
+// RAII ラッパ: LocalFree で PSECURITY_DESCRIPTOR を解放する
+struct SdRaii {
+    PSECURITY_DESCRIPTOR ptr = nullptr;
+    ~SdRaii() { if (ptr) LocalFree(ptr); }
+};
+
+/// PipeAcl と custom_sddl から SECURITY_ATTRIBUTES を構築するヘルパー。
+/// acl == Default のときは sa_out を設定せず nullptr を返す。
+/// きず nullptr 以外を返のならば sd_out.ptr が LocalFree を要するリソースを保持する。
+static SECURITY_ATTRIBUTES* build_security_attributes(
+    pipeutil::PipeAcl acl,
+    const std::string& custom_sddl,
+    SdRaii& sd_out,
+    SECURITY_ATTRIBUTES& sa_out)
+{
+    if (acl == pipeutil::PipeAcl::Default) {
+        return nullptr;
+    }
+
+    const wchar_t* sddl_str = nullptr;
+    std::wstring   custom_ws;
+
+    switch (acl) {
+        case pipeutil::PipeAcl::LocalSystem:
+            // SYSTEM: 全権 (GA), Builtin Admins: 読み書き (GRGW), IU (インタラクティブユーザー): 読み書き
+            sddl_str = L"D:(A;;GA;;;SY)(A;;GRGW;;;BA)(A;;GRGW;;;IU)";
+            break;
+        case pipeutil::PipeAcl::Everyone:
+            // WD = World (Everyone): 全権。警告: セキュリティリスクあり
+            sddl_str = L"D:(A;;GA;;;WD)";
+            break;
+        case pipeutil::PipeAcl::Custom:
+            if (custom_sddl.empty()) {
+                throw pipeutil::PipeException{
+                    pipeutil::PipeErrorCode::InvalidArgument,
+                    "Custom SDDL string is empty"};
+            }
+            custom_ws = utf8_to_wstring(custom_sddl);
+            sddl_str  = custom_ws.c_str();
+            break;
+        default:
+            return nullptr;  // 安全側のフォールバック
+    }
+
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl_str, SDDL_REVISION_1, &sd_out.ptr, nullptr)) {
+        throw pipeutil::PipeException{
+            pipeutil::PipeErrorCode::AccessDenied,
+            "Failed to parse SDDL security descriptor"};
+    }
+
+    sa_out.nLength              = sizeof(SECURITY_ATTRIBUTES);
+    sa_out.lpSecurityDescriptor = sd_out.ptr;
+    sa_out.bInheritHandle       = FALSE;
+    return &sa_out;
+}
+
+void Win32Pipe::server_create(const std::string& pipe_name,
+                               pipeutil::PipeAcl acl,
+                               const std::string& custom_sddl) {
+    // ACL 設定をメンバーに保存（server_accept_and_fork で・次ハンドル作成時に再適用する）
+    acl_         = acl;
+    custom_sddl_ = custom_sddl;
+
     if (listening_) {
         throw pipeutil::PipeException{pipeutil::PipeErrorCode::AlreadyConnected,
                                       "Already listening"};
@@ -102,6 +166,11 @@ void Win32Pipe::server_create(const std::string& pipe_name) {
                                       "CreateEventW failed (stop_event)"};
     }
 
+    // SDDL を SECURITY_ATTRIBUTES に変換（Default の場合は nullptr を返す）
+    SdRaii               sd_raii;
+    SECURITY_ATTRIBUTES  sa_storage = {};
+    SECURITY_ATTRIBUTES* p_sa = build_security_attributes(acl_, custom_sddl_, sd_raii, sa_storage);
+
     hPipe_ = CreateNamedPipeW(
         path.c_str(),
         PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
@@ -110,8 +179,9 @@ void Win32Pipe::server_create(const std::string& pipe_name) {
         static_cast<DWORD>(buf_size_),            // 出力バッファ
         static_cast<DWORD>(buf_size_),            // 入力バッファ
         0,                                        // デフォルトタイムアウト
-        nullptr                                   // セキュリティ属性
+        p_sa                                      // ACL 設定（Default の場合 nullptr）
     );
+    // sd_raii のデストラクタが LocalFree を自動呼び出す（例外安全）
 
     if (hPipe_ == INVALID_HANDLE_VALUE) {
         const DWORD err = GetLastError();
@@ -249,6 +319,12 @@ std::unique_ptr<IPlatformPipe> Win32Pipe::server_accept_and_fork(int64_t timeout
     forked->connected_ = true;
 
     // 自身は次クライアント用の新しいハンドルを作成して listen 状態を維持
+    // 同一の ACL を継続適用するため、メンバーの acl_ / custom_sddl_ を再利用する
+    SdRaii               sd_raii_next;
+    SECURITY_ATTRIBUTES  sa_storage_next = {};
+    SECURITY_ATTRIBUTES* p_sa_next = build_security_attributes(
+        acl_, custom_sddl_, sd_raii_next, sa_storage_next);
+
     hPipe_ = CreateNamedPipeW(
         pipe_name_wstr_.c_str(),
         PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
@@ -257,7 +333,7 @@ std::unique_ptr<IPlatformPipe> Win32Pipe::server_accept_and_fork(int64_t timeout
         static_cast<DWORD>(buf_size_),
         static_cast<DWORD>(buf_size_),
         0,
-        nullptr
+        p_sa_next
     );
     if (hPipe_ == INVALID_HANDLE_VALUE) {
         const DWORD err2 = GetLastError();

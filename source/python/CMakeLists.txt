@@ -30,6 +30,10 @@ target_link_libraries(_pipeutil PRIVATE pipeutil_core)
 target_compile_options(_pipeutil PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /utf-8 /wd4251 /wd4275>
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
+    # PyTypeObject は指定子初期化で未設定フィールドを 0 にする慣用句のため抑制
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wno-missing-field-initializers>
+    # Python getter/setter は意図的な関数ポインタキャストのため抑制
+    $<$<CXX_COMPILER_ID:GNU>:-Wno-cast-function-type>
 )
 
 # ─── 出力先: Python パッケージディレクトリ直下 ────────────────────────
@@ -60,6 +64,18 @@ if(WIN32)
     )
 endif()
 
+# ─── install() ルール — scikit-build-core が wheel に収録するために必須 ────────
+# scikit-build-core は install() ルールで登録されたターゲット・ファイルを
+# wheel に収録する。DESTINATION は Python パッケージルート相対パス。
+install(TARGETS _pipeutil
+    LIBRARY DESTINATION pipeutil   # Linux .so
+    RUNTIME DESTINATION pipeutil   # Windows .pyd
+)
+# 依存 DLL (Windows: pipeutil_core.dll) も同梱する
+if(WIN32)
+    install(FILES $<TARGET_FILE:pipeutil_core> DESTINATION pipeutil)
+endif()
+
 # ─── _pipeutil_async: native async I/O 拡張 (Phase 2) ────────────────────────
 # cmake -DPIPEUTIL_WITH_ASYNC=ON で有効化（spec/F004p2_async_native.md §7.2）
 if(PIPEUTIL_WITH_ASYNC)
@@ -79,6 +95,8 @@ if(PIPEUTIL_WITH_ASYNC)
     target_compile_options(_pipeutil_async PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /utf-8 /wd4251 /wd4275>
         $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic -Werror>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wno-missing-field-initializers>
+        $<$<CXX_COMPILER_ID:GNU>:-Wno-cast-function-type>
     )
 
     set_target_properties(_pipeutil_async PROPERTIES
@@ -103,4 +121,9 @@ if(PIPEUTIL_WITH_ASYNC)
                 "${_PIPEUTIL_PY_PACKAGE_DIR}/$<TARGET_FILE_NAME:pipeutil_core>"
         )
     endif()
+
+    install(TARGETS _pipeutil_async
+        LIBRARY DESTINATION pipeutil
+        RUNTIME DESTINATION pipeutil
+    )
 endif()
