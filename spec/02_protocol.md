@@ -22,6 +22,8 @@
 ├───────────────────────────────────────────────────────────────────┤
 │  checksum   (uint32_t, little-endian, CRC-32C)                    │
 ├───────────────────────────────────────────────────────────────────┤
+│  message_id (uint32_t, little-endian; 0x00000000 = ID なし)       │
+├───────────────────────────────────────────────────────────────────┤
 │  payload (payload_size バイト) ...                                │
 └───────────────────────────────────────────────────────────────────┘
 ```
@@ -31,14 +33,15 @@
 | フィールド | オフセット | サイズ | 型 | 説明 |
 |-----------|-----------|--------|-----|------|
 | `magic` | 0 | 4 バイト | `uint8_t[4]` | `{0x50, 0x49, 0x50, 0x45}` = `"PIPE"` |
-| `version` | 4 | 1 バイト | `uint8_t` | プロトコルバージョン（現在 = `0x01`） |
+| `version` | 4 | 1 バイト | `uint8_t` | プロトコルバージョン（現在 = `0x02`; v1.0.0 まで `0x01`）|
 | `flags` | 5 | 1 バイト | `uint8_t` | ビットフラグ（後述） |
 | `reserved` | 6 | 2 バイト | `uint8_t[2]` | 将来拡張用、送信時は `0x00` で埋めること |
 | `payload_size` | 8 | 4 バイト | `uint32_t` (LE) | ペイロードのバイト数（ヘッダ含まず） |
 | `checksum` | 12 | 4 バイト | `uint32_t` (LE) | ペイロード全体の CRC-32C チェックサム |
-| `payload` | 16 | 可変 | `uint8_t[]` | メッセージ本体 |
+| `message_id` | 16 | 4 バイト | `uint32_t` (LE) | RPC メッセージ ID（F-002）。`0x00000000` = ID なし（通常メッセージ）|
+| `payload` | 20 | 可変 | `uint8_t[]` | メッセージ本体 |
 
-**ヘッダ固定サイズ**: `16 バイト`
+**ヘッダ固定サイズ**: `20 バイト`（v1.0.0 までは 16 バイト; F-002 で `message_id` フィールド追加）
 
 ### 2.2 `flags` ビット定義
 
@@ -46,7 +49,10 @@
 |-------|------|------|
 | 0 | `FLAG_COMPRESSED` | ペイロードが圧縮済み（将来拡張、現在は使用しない） |
 | 1 | `FLAG_ACK` | ACK メッセージ（将来拡張） |
-| 2–7 | (reserved) | 送受信時は `0` を設定すること |
+| 2 | `FLAG_REQUEST` | RPC リクエスト（F-002）|
+| 3 | `FLAG_RESPONSE` | RPC レスポンス（F-002）|
+| 4–6 | (reserved) | 送受信時は `0` を設定すること |
+| 7 | `FLAG_HELLO` | Capability Negotiation HELLO フレーム（v1.1.0; [spec/A001](A001_capability_negotiation.md)）|
 
 ---
 
@@ -103,8 +109,9 @@ uint32_t compute_crc32c(std::span<const std::byte> payload) noexcept;
 送信側 (send)
   1. payload_size = message.size()
   2. checksum    = compute_crc32c(message.payload())
-  3. FrameHeader を構築（マジック・バージョン・フラグ・payload_size・checksum）
-  4. write(header, 16 バイト)
+  3. FrameHeader を構築（マジック・バージョン・フラグ・payload_size・checksum・message_id）
+     ※ 通常メッセージは message_id = NO_MESSAGE_ID (0x00000000)
+  4. write(header, 20 バイト)
   5. write(payload, payload_size バイト)
 ```
 
@@ -112,14 +119,14 @@ uint32_t compute_crc32c(std::span<const std::byte> payload) noexcept;
 
 ```
 受信側 (receive)
-  1. read(header_buf, 16 バイト)  ← 16 バイト揃うまでブロック
+  1. read(header_buf, 20 バイト)  ← 20 バイト揃うまでブロック
   2. magic 検証 → 不一致なら InvalidMessage
-  3. version 検証 → 0x01 以外なら InvalidMessage
+  3. version 検証 → 0x02 以外なら InvalidMessage
   4. payload_size = header.payload_size
   5. read(payload_buf, payload_size バイト)  ← 全バイト揃うまでブロック
   6. computed_crc = compute_crc32c(payload_buf)
   7. computed_crc != header.checksum → InvalidMessage
-  8. Message{payload_buf} を返す
+  8. Message{payload_buf, message_id=header.message_id} を返す
 ```
 
 ---
@@ -133,21 +140,28 @@ namespace pipeutil::detail {
 #pragma pack(push, 1)  // パディングなし（明示的レイアウト）
 struct FrameHeader {
     uint8_t  magic[4];        // {'P','I','P','E'}
-    uint8_t  version;         // 0x01
+    uint8_t  version;         // PROTOCOL_VERSION (0x02)
     uint8_t  flags;           // FLAG_* ビット
-    uint8_t  reserved[2];     // 0x00 0x00
-    uint32_t payload_size;    // little-endian
-    uint32_t checksum;        // CRC-32C, little-endian
+    uint8_t  reserved[2];     // 将来拡張用。送信時は 0x00 で埋めること
+    uint32_t payload_size;    // ペイロードサイズ（リトルエンディアン）
+    uint32_t checksum;        // CRC-32C（ペイロードのみ、リトルエンディアン）
+    uint32_t message_id;      // RPC メッセージ ID（LE）; 0 = ID なし（F-002）
 };
 #pragma pack(pop)
 
-static_assert(sizeof(FrameHeader) == 16, "FrameHeader must be 16 bytes");
+static_assert(sizeof(FrameHeader) == 20, "FrameHeader must be exactly 20 bytes");
 
-inline constexpr uint8_t MAGIC[4] = {0x50, 0x49, 0x50, 0x45};
-inline constexpr uint8_t PROTOCOL_VERSION = 0x01;
+inline constexpr uint8_t  MAGIC[4]          = {0x50, 0x49, 0x50, 0x45};  // "PIPE"
+inline constexpr uint8_t  PROTOCOL_VERSION  = 0x02;  // F-002 で 0x01 → 0x02 へ更新
 
-inline constexpr uint8_t FLAG_COMPRESSED = 0x01;
-inline constexpr uint8_t FLAG_ACK        = 0x02;
+inline constexpr uint8_t  FLAG_COMPRESSED   = 0x01;  // ペイロード圧縮済み（将来拡張）
+inline constexpr uint8_t  FLAG_ACK          = 0x02;  // ACK（将来拡張）
+inline constexpr uint8_t  FLAG_REQUEST      = 0x04;  // RPC リクエスト (F-002)
+inline constexpr uint8_t  FLAG_RESPONSE     = 0x08;  // RPC レスポンス (F-002)
+inline constexpr uint8_t  FLAG_HELLO        = 0x80;  // Capability Negotiation (A-001, v1.1.0)
+
+inline constexpr uint32_t NO_MESSAGE_ID     = 0x00000000u;  // ID なし（通常 send/receive）
+inline constexpr uint32_t EMPTY_CHECKSUM    = 0x00000000u;  // payload_size=0 時のチェックサム
 
 } // namespace pipeutil::detail
 ```
@@ -156,7 +170,7 @@ inline constexpr uint8_t FLAG_ACK        = 0x02;
 
 ## 8. 空メッセージ
 
-`payload_size == 0` の場合、ペイロード読み出しはスキップする（16 バイトのヘッダのみ）。
+`payload_size == 0` の場合、ペイロード読み出しはスキップする（20 バイトのヘッダのみ）。
 `checksum` は `0x00000000` を設定する（未定義とせず固定値とすること）。
 
 ---
@@ -165,12 +179,15 @@ inline constexpr uint8_t FLAG_ACK        = 0x02;
 
 | version | 説明 |
 |---------|------|
-| `0x01` | 初期バージョン（本仕様） |
-| `0x00` | 予約（使用禁止） |
-| `0x02`〜 | 将来拡張 |
+| `0x01` | 旧バージョン（v1.0.0; 16 バイトヘッダ、`message_id` フィールドなし）|
+| `0x02` | 現行バージョン（v1.1.0 以降; 20 バイトヘッダ、`message_id` フィールド追加 F-002）|
+| `0x00` | 予約（使用禁止）|
+| `0x03`〜 | 将来拡張（未定義）|
 
-受信側は `version > 0x01` の場合 `InvalidMessage` 例外を送出する（フォワード互換性なし）。
-バージョン不整合が頻出する場合は `NotSupported` に変更を検討すること。
+受信側は `version != 0x02` の場合 `InvalidMessage` 例外を送出する（フォワード互換性なし）。  
+**注意**: v1.0.0 実装（version=`0x01`）は受信時に `version != 0x01` を `InvalidMessage` として拒否するため、
+v1.1.0 クライアントから v1.0.0 サーバーへの接続は不可となる。
+混在デプロイ戦略は [spec/A001_capability_negotiation.md](A001_capability_negotiation.md) を参照。
 
 ---
 
