@@ -398,10 +398,8 @@ TEST(StatsTest, stats_multi_server_aggregation) {
         });
     });
 
-    // サーバーが起動するまで少し待つ
-    std::this_thread::sleep_for(100ms);
-
     // N クライアントを同時接続して各 MSGS_PER_SESSION 送信
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     std::vector<std::thread> clients;
     clients.reserve(N);
     for (int i = 0; i < N; ++i) {
@@ -416,9 +414,8 @@ TEST(StatsTest, stats_multi_server_aggregation) {
     }
     for (auto& t : clients) t.join();
 
-    // 全セッション完了後に stats を確認
-    // 少し待ってからスナップショット取得（スレッド間の集計を待つ）
-    std::this_thread::sleep_for(100ms);
+    // srv.stop() は active_count_ == 0 まで内部で待機するため、
+    // SlotGuard による accumulated_stats_ の集約も完了後にアンブロック
     srv.stop();
     srv_thread.join();
 

@@ -69,9 +69,7 @@ TEST(SecurityAcl, DefaultAclRoundTrip) {
         s.send(msg);  // エコー
     });
 
-    // サーバー起動を少し待つ
-    std::this_thread::sleep_for(50ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     PipeClient client{name};
     ASSERT_NO_THROW(client.connect(3000ms));
     ASSERT_NO_THROW(client.send(Message{std::string{"ping"}}));
@@ -108,8 +106,8 @@ TEST(SecurityAcl, LocalSystemAclRoundTrip) {
         auto msg = s.receive(5000ms);
         s.send(msg);
     });
-    std::this_thread::sleep_for(50ms);
 
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     PipeClient client{name};
     ASSERT_NO_THROW(client.connect(3000ms));
     ASSERT_NO_THROW(client.send(Message{std::string{"hello"}}));
@@ -128,8 +126,8 @@ TEST(SecurityAcl, EveryoneAclRoundTrip) {
         auto msg = s.receive(5000ms);
         s.send(msg);
     });
-    std::this_thread::sleep_for(50ms);
 
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     PipeClient client{name};
     ASSERT_NO_THROW(client.connect(3000ms));
     ASSERT_NO_THROW(client.send(Message{std::string{"world"}}));

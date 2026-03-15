@@ -66,9 +66,7 @@ TEST(RpcTest, SendRequest_SingleRoundTrip) {
         EXPECT_EQ(handled, 1);
     });
 
-    // サーバーの listen を待つ
-    std::this_thread::sleep_for(50ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     RpcPipeClient cli{pipe_name};
     cli.connect(3000ms);
 
@@ -101,8 +99,7 @@ TEST(RpcTest, SendRequest_MultipleParallel) {
         srv.stop();
     });
 
-    std::this_thread::sleep_for(50ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     RpcPipeClient cli{pipe_name};
     cli.connect(3000ms);
 
@@ -138,8 +135,7 @@ TEST(RpcTest, SendRequest_Timeout_ThrowsTimeout) {
         srv.close();
     });
 
-    std::this_thread::sleep_for(50ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     RpcPipeClient cli{pipe_name};
     cli.connect(3000ms);
 
@@ -172,8 +168,7 @@ TEST(RpcTest, PlainSend_CoexistsWithRpc) {
         srv.stop();
     });
 
-    std::this_thread::sleep_for(50ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     RpcPipeClient cli{pipe_name};
     cli.connect(3000ms);
 
@@ -202,8 +197,7 @@ TEST(RpcTest, ServerDisconnect_RejectsAllPending) {
         srv.close();
     });
 
-    std::this_thread::sleep_for(50ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     RpcPipeClient cli{pipe_name};
     cli.connect(3000ms);
 

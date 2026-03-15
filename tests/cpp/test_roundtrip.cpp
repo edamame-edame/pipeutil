@@ -50,9 +50,7 @@ TEST(RoundTripTest, ClientToServer_SingleMessage) {
         EXPECT_EQ(msg.as_string_view(), "hello");
     });
 
-    // サーバーが listen するまで少し待つ
-    std::this_thread::sleep_for(50ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     PipeClient cli{pipe_name};
     cli.connect(3000ms);
     cli.send(Message{std::string_view{"hello"}});
@@ -77,8 +75,6 @@ TEST(RoundTripTest, ServerToClient_SingleMessage) {
         client_done.get_future().wait();
         srv.close();
     });
-
-    std::this_thread::sleep_for(50ms);
 
     PipeClient cli{pipe_name};
     cli.connect(3000ms);
@@ -108,8 +104,6 @@ TEST(RoundTripTest, Bidirectional_EchoServer) {
         srv.close();
     });
 
-    std::this_thread::sleep_for(50ms);
-
     PipeClient cli{pipe_name};
     cli.connect(3000ms);
     cli.send(Message{std::string_view{"echo_payload"}});
@@ -135,8 +129,6 @@ TEST(RoundTripTest, MultipleMessages) {
         }
     });
 
-    std::this_thread::sleep_for(50ms);
-
     PipeClient cli{pipe_name};
     cli.connect(3000ms);
     for (int i = 0; i < kCount; ++i) {
@@ -161,8 +153,6 @@ TEST(RoundTripTest, Receive_Timeout_ThrowsTimeoutException) {
         std::this_thread::sleep_for(500ms);
         srv.close();
     });
-
-    std::this_thread::sleep_for(50ms);
 
     PipeClient cli{pipe_name};
     cli.connect(3000ms);
@@ -192,8 +182,6 @@ TEST(RoundTripTest, LargePayload_1MiB) {
         EXPECT_EQ(msg.payload()[0],            std::byte{0xCD});
         EXPECT_EQ(msg.payload()[kPayloadSize-1],std::byte{0xCD});
     });
-
-    std::this_thread::sleep_for(50ms);
 
     PipeClient cli{pipe_name, kPayloadSize + 64};
     cli.connect(3000ms);
