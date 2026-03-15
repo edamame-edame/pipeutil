@@ -23,8 +23,10 @@
 #include "pipeutil/pipe_stats.hpp"
 #include "pipeutil/pipe_error.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <future>
+#include <mutex>
 #include <numeric>
 #include <string>
 #include <thread>
@@ -386,7 +388,6 @@ TEST(StatsTest, stats_multi_server_aggregation) {
     constexpr int MSGS_PER_SESSION = 4;
 
     MultiPipeServer srv{pipe, N};
-    std::promise<void> srv_started;
 
     // サーバーを背景スレッドで serve
     auto srv_thread = std::thread([&] {
@@ -398,26 +399,49 @@ TEST(StatsTest, stats_multi_server_aggregation) {
         });
     });
 
+    // is_serving() が true になるまでポーリング（serve() 内 serving_ セット後、
+    // server_create() でパイプが作成されるため connect() のリトライ機構で吸収される）
+    for (int i = 0; i < 2000 && !srv.is_serving(); ++i) {
+        std::this_thread::sleep_for(1ms);
+    }
+    ASSERT_TRUE(srv.is_serving()) << "server failed to start within 2s";
+
     // N クライアントを同時接続して各 MSGS_PER_SESSION 送信
-    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
+    // タイムアウトを十分大きく設定し、CPU 負荷時の PIPE_BUSY リトライ（最大 ~10ms×N 回）を吸収する。
+    // try/catch で未キャッチ例外による std::terminate を防ぎ、失敗を ASSERT で報告する。
+    std::mutex err_mutex;
+    std::exception_ptr client_error;
     std::vector<std::thread> clients;
     clients.reserve(N);
     for (int i = 0; i < N; ++i) {
-        clients.emplace_back([&pipe] {
-            PipeClient cli{pipe};
-            cli.connect(3000ms);
-            for (int j = 0; j < MSGS_PER_SESSION; ++j) {
-                cli.send(Message{std::string_view{"hello"}});
+        clients.emplace_back([&pipe, &err_mutex, &client_error] {
+            try {
+                PipeClient cli{pipe};
+                cli.connect(30000ms);
+                for (int j = 0; j < MSGS_PER_SESSION; ++j) {
+                    cli.send(Message{std::string_view{"hello"}});
+                }
+                cli.close();
+            } catch (const std::exception&) {
+                std::lock_guard<std::mutex> lk{err_mutex};
+                if (!client_error) client_error = std::current_exception();
+            } catch (...) {
+                std::lock_guard<std::mutex> lk{err_mutex};
+                if (!client_error) client_error = std::current_exception();
             }
-            cli.close();
         });
     }
     for (auto& t : clients) t.join();
 
+    // srv.stop()/join を先に実行してサーバースレッドを終了させる。
+    // こうすることで ASSERT が途中で失敗しても srv_thread.~thread() が
+    // joinable のまま残らず std::terminate を防ぐ。
     // srv.stop() は active_count_ == 0 まで内部で待機するため、
     // SlotGuard による accumulated_stats_ の集約も完了後にアンブロック
     srv.stop();
     srv_thread.join();
+
+    ASSERT_FALSE(client_error) << "one or more clients failed to connect or send";
 
     const auto s = srv.stats();
     // サーバー側: N * MSGS_PER_SESSION メッセージを受信

@@ -198,6 +198,25 @@ void Win32Pipe::server_create(const std::string& pipe_name,
     }
     accept_ov_ = {};
     accept_ov_.hEvent = accept_event_;
+
+    // ハンドルを DISCONNECTED ではなく LISTENING 状態に移行させることで、
+    // WaitNamedPipeW がクライアントを即時通知できるようにする。
+    // クライアントが ConnectNamedPipe 呼び出し前に接続済みの場合は
+    // accept_preconnected_ = true でフラグ管理する。
+    {
+        const BOOL first_conn = ConnectNamedPipe(hPipe_, &accept_ov_);
+        const DWORD first_err = GetLastError();
+        if (first_conn || first_err == ERROR_PIPE_CONNECTED) {
+            accept_preconnected_ = true;   // クライアントが先行接続済み
+        } else if (first_err == ERROR_IO_PENDING) {
+            accept_preconnected_ = false;  // 非同期待機中
+        } else {
+            CloseHandle(hPipe_);       hPipe_        = INVALID_HANDLE_VALUE;
+            CloseHandle(accept_event_); accept_event_ = nullptr;
+            throw pipeutil::PipeException{pipeutil::PipeErrorCode::SystemError,
+                                          "ConnectNamedPipe failed in server_create"};
+        }
+    }
     listening_ = true;
 }
 
@@ -265,19 +284,11 @@ std::unique_ptr<IPlatformPipe> Win32Pipe::server_accept_and_fork(int64_t timeout
                                       "events not initialized; call server_create() first"};
     }
 
-    // accept_ov_ / accept_event_ はメンバー変数: lifetime が Win32Pipe と同じなので
-    // stop path で GetOverlappedResult を待たずに throw しても安全。
-    // I/O は server_close() で hPipe_ を CloseHandle した際に OS が自動キャンセルする。
-    ResetEvent(accept_event_);
-    accept_ov_ = {};
-    accept_ov_.hEvent = accept_event_;
-
-    const BOOL connected_res = ConnectNamedPipe(hPipe_, &accept_ov_);
-    const DWORD err = GetLastError();
-
-    if (connected_res || err == ERROR_PIPE_CONNECTED) {
-        // 即時成功（クライアントがすでに接続済み）— accept_ov_ は使用済み、何もしない
-    } else if (err == ERROR_IO_PENDING) {
+    // ─── フェーズ1: 現在の accept 完了を待つ ─────────────────────────
+    // 前提: server_create() または直前の server_accept_and_fork() 末尾で
+    //       ConnectNamedPipe(hPipe_, &accept_ov_) が発行済み。
+    // accept_preconnected_ == true の場合はすでに接続済みのため待機不要。
+    if (!accept_preconnected_) {
         // 非同期: stop_event_ または accept イベントを待つ
         HANDLE handles[2] = {accept_event_, stop_event_};
         const DWORD dw_timeout = (timeout_ms == 0)
@@ -308,11 +319,10 @@ std::unique_ptr<IPlatformPipe> Win32Pipe::server_accept_and_fork(int64_t timeout
             throw pipeutil::PipeException{map_win32_error(err2),
                                           "GetOverlappedResult failed (accept_and_fork)"};
         }
-    } else {
-        throw pipeutil::PipeException{map_win32_error(err), "ConnectNamedPipe failed"};
     }
+    accept_preconnected_ = false;  // 次回呼び出しのためにリセット
 
-    // ─── fork: 接続済み HANDLE を新しい Win32Pipe インスタンスに移す ──
+    // ─── フェーズ2: 接続済み HANDLE を新しい Win32Pipe インスタンスに移す ──
     auto forked = std::make_unique<Win32Pipe>(buf_size_);
     forked->hPipe_     = hPipe_;  // 接続済みハンドルを譲渡
     forked->listening_ = false;
@@ -341,6 +351,26 @@ std::unique_ptr<IPlatformPipe> Win32Pipe::server_accept_and_fork(int64_t timeout
         listening_ = false;
         throw pipeutil::PipeException{map_win32_error(err2),
                                       "CreateNamedPipeW failed in accept_and_fork (next handle)"};
+    }
+
+    // ─── フェーズ3: 次クライアント用の ConnectNamedPipe を即時発行 ─────────────
+    // 新ハンドルを DISCONNECTED のままにせず LISTENING 状態に移行させることで、
+    // WaitNamedPipeW がクライアントを正しく通知できるようにし、待機スピンを防ぐ。
+    ResetEvent(accept_event_);
+    accept_ov_ = {};
+    accept_ov_.hEvent = accept_event_;
+    {
+        const BOOL next_conn = ConnectNamedPipe(hPipe_, &accept_ov_);
+        const DWORD next_err = GetLastError();
+        if (next_conn || next_err == ERROR_PIPE_CONNECTED) {
+            accept_preconnected_ = true;   // クライアントが gap 内に先行接続済み
+        } else if (next_err == ERROR_IO_PENDING) {
+            accept_preconnected_ = false;  // 非同期待機中
+        } else {
+            listening_ = false;
+            throw pipeutil::PipeException{map_win32_error(next_err),
+                                          "ConnectNamedPipe failed in accept_and_fork (next)"};
+        }
     }
 
     return forked;
@@ -415,8 +445,18 @@ void Win32Pipe::client_connect(const std::string& pipe_name, int64_t timeout_ms)
             throw pipeutil::PipeException{pipeutil::PipeErrorCode::Timeout};
         }
 
-        // 最大 10ms 待機してリトライ（サーバー起動待ち）
-        WaitNamedPipeW(path.c_str(), 10);
+        if (err == ERROR_FILE_NOT_FOUND) {
+            // パイプがまだ作成されていない: WaitNamedPipeW は即時リターンするため
+            // CPU スピン待機を避けるために短い sleep を挟む（サーバースレッド飢餓対策）
+            ::Sleep(1);
+        } else {
+            // ERROR_PIPE_BUSY: 既存インスタンスに空きが出るまで最大 10ms 待機。
+            // pendingConnectNamedPipe がまだない場合は FALSE を即時返す可能性があるため、
+            // その場合も Sleep(1) で CPU を手放し acceptor スレッドのスケジューリングを促す。
+            if (!WaitNamedPipeW(path.c_str(), 10)) {
+                ::Sleep(1);
+            }
+        }
     }
 
     PIPELOG("client_connect: CreateFileW succeeded");
