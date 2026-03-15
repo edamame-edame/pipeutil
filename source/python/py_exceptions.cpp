@@ -14,6 +14,8 @@ PyObject* g_ConnectionResetError = nullptr;
 PyObject* g_BrokenPipeError      = nullptr;
 PyObject* g_NotConnectedError    = nullptr;
 PyObject* g_InvalidMessageError  = nullptr;
+PyObject* g_ConnectionRejectedError = nullptr;
+PyObject* g_QueueFullError          = nullptr;
 
 // ─── 例外クラス階層登録 ────────────────────────────────────────────────
 
@@ -64,6 +66,14 @@ int init_exceptions(PyObject* module) noexcept {
                            "_pipeutil.InvalidMessageError", "InvalidMessageError",
                            g_PipeError, &g_InvalidMessageError) < 0) return -1;
 
+    if (register_exception(module,
+                           "_pipeutil.ConnectionRejectedError", "ConnectionRejectedError",
+                           g_PipeError, &g_ConnectionRejectedError) < 0) return -1;
+
+    if (register_exception(module,
+                           "_pipeutil.QueueFullError", "QueueFullError",
+                           g_PipeError, &g_QueueFullError) < 0) return -1;
+
     return 0;
 }
 
@@ -83,6 +93,10 @@ void set_python_exception(const pipeutil::PipeException& e) noexcept {
             exc_type = g_NotConnectedError;    break;
         case pipeutil::PipeErrorCode::InvalidMessage:
             exc_type = g_InvalidMessageError;  break;
+        case pipeutil::PipeErrorCode::ConnectionRejected:
+            exc_type = g_ConnectionRejectedError; break;
+        case pipeutil::PipeErrorCode::QueueFull:
+            exc_type = g_QueueFullError;        break;
         default:
             exc_type = g_PipeError;            break;
     }

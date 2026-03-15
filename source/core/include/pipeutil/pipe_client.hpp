@@ -2,6 +2,7 @@
 #pragma once
 
 #include "pipeutil_export.hpp"
+#include "capability.hpp"
 #include "message.hpp"
 #include "pipe_stats.hpp"
 #include <chrono>
@@ -21,8 +22,11 @@ namespace pipeutil {
 // ──────────────────────────────────────────────────────────────────────────────
 class PIPEUTIL_API PipeClient {
 public:
+    /// hello_config: HELLO ハンドシェイクポリシー（デフォルト = Compat / 500ms）
+    /// デフォルト引数により既存コードへの影響はない（後方互換）。
     explicit PipeClient(std::string pipe_name,
-                        std::size_t buffer_size = 65536);
+                        std::size_t buffer_size  = 65536,
+                        HelloConfig hello_config = HelloConfig{});
 
     PipeClient(const PipeClient&)            = delete;
     PipeClient& operator=(const PipeClient&) = delete;
@@ -58,6 +62,11 @@ public:
 
     [[nodiscard]] bool               is_connected() const noexcept;
     [[nodiscard]] const std::string& pipe_name()    const noexcept;
+
+    // ─── Capability Negotiation (A-001) ──────────────────────────────
+
+    /// connect() 後に使用可能。HELLO が無効またはタイムアウトした場合は bitmap == 0。
+    [[nodiscard]] NegotiatedCapabilities negotiated_capabilities() const noexcept;
 
     // ─── 診断・メトリクス (F-006) ─────────────────────────────────────
 

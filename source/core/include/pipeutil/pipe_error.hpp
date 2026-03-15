@@ -21,10 +21,11 @@ enum class PipeErrorCode : int {
     NotFound         = 3,
 
     // 接続状態
-    AlreadyConnected = 10,
-    NotConnected     = 11,
-    ConnectionReset  = 12,  // 相手側が切断した
-    Timeout          = 13,
+    AlreadyConnected    = 10,
+    NotConnected        = 11,
+    ConnectionReset     = 12,  // 相手側が切断した
+    Timeout             = 13,
+    ConnectionRejected  = 14,  // HELLO ハンドシェイク拒否 (A-001; Strict モード)
 
     // I/O
     BrokenPipe       = 20,
@@ -36,6 +37,9 @@ enum class PipeErrorCode : int {
     NotSupported         = 31,
     Interrupted          = 32,  // accept 操作が stop_accept() によって中断された
     TooManyConnections   = 33,  // R-044: 非同期接続数上限 (64) 超過
+
+    // Capability Negotiation / Flow Control (v1.1.0+)
+    QueueFull            = 40,  // in-flight 上限超過 (A-002; v1.3.0 で実装)
 };
 
 // PipeErrorCode を std::error_category に変換するユーティリティ（内部実装用）

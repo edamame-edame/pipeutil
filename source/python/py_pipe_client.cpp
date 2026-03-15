@@ -3,6 +3,7 @@
 // GIL: connect / send / receive はブロッキング I/O のため GIL を解放する。
 
 #include "py_pipe_client.hpp"
+#include "py_capability.hpp"
 #include "py_exceptions.hpp"
 #include "py_message.hpp"
 #include "py_pipe_stats.hpp"
@@ -36,13 +37,14 @@ static PyObject* PyPipeClient_new(PyTypeObject* type,
 }
 
 static int PyPipeClient_init(PyPipeClient* self, PyObject* args, PyObject* kwds) {
-    static const char* kwlist[] = {"pipe_name", "buffer_size", nullptr};
-    const char* pipe_name = nullptr;
-    Py_ssize_t  buffer_size = 65536;
+    static const char* kwlist[] = {"pipe_name", "buffer_size", "hello_config", nullptr};
+    const char* pipe_name    = nullptr;
+    Py_ssize_t  buffer_size  = 65536;
+    PyObject*   hello_config_obj = nullptr;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|n",
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|nO",
                                      const_cast<char**>(kwlist),
-                                     &pipe_name, &buffer_size)) {
+                                     &pipe_name, &buffer_size, &hello_config_obj)) {
         return -1;
     }
     if (buffer_size <= 0) {
@@ -50,11 +52,37 @@ static int PyPipeClient_init(PyPipeClient* self, PyObject* args, PyObject* kwds)
         return -1;
     }
 
+    // HelloConfig の解析 (None / 省略時はデフォルト値) (A-001)
+    pipeutil::HelloConfig hello_cfg{};
+    if (hello_config_obj && hello_config_obj != Py_None) {
+        PyObject* mode_attr = PyObject_GetAttrString(hello_config_obj, "mode");
+        if (!mode_attr) return -1;
+        long mode_val = PyLong_AsLong(mode_attr);
+        Py_DECREF(mode_attr);
+        if (mode_val == -1 && PyErr_Occurred()) return -1;
+        hello_cfg.mode = static_cast<pipeutil::HelloMode>(mode_val);
+
+        PyObject* timeout_attr = PyObject_GetAttrString(hello_config_obj, "hello_timeout_ms");
+        if (!timeout_attr) return -1;
+        long timeout_val = PyLong_AsLong(timeout_attr);
+        Py_DECREF(timeout_attr);
+        if (timeout_val == -1 && PyErr_Occurred()) return -1;
+        hello_cfg.hello_timeout = std::chrono::milliseconds{timeout_val};
+
+        PyObject* caps_attr = PyObject_GetAttrString(hello_config_obj, "advertised_capabilities");
+        if (!caps_attr) return -1;
+        unsigned long caps_val = PyLong_AsUnsignedLong(caps_attr);
+        Py_DECREF(caps_attr);
+        if (caps_val == static_cast<unsigned long>(-1) && PyErr_Occurred()) return -1;
+        hello_cfg.advertised_capabilities = static_cast<uint32_t>(caps_val);
+    }
+
     try {
         delete self->client;
         self->client = new pipeutil::PipeClient{
             std::string{pipe_name},
-            static_cast<std::size_t>(buffer_size)};
+            static_cast<std::size_t>(buffer_size),
+            hello_cfg};
     } catch (const pipeutil::PipeException& e) {
         set_python_exception(e);
         return -1;
@@ -213,11 +241,23 @@ static PyObject* PyPipeClient_get_pipe_name(PyPipeClient* self, void*) {
     return PyUnicode_FromString(self->client->pipe_name().c_str());
 }
 
+// ネゴシエーション結果プロパティ (A-001)
+static PyObject* PyPipeClient_get_negotiated_capabilities(PyPipeClient* self, void*) {
+    if (!self->client) {
+        PyErr_SetString(PyExc_RuntimeError, "PipeClient is closed");
+        return nullptr;
+    }
+    return PyNegotiatedCapabilities_from_caps(self->client->negotiated_capabilities());
+}
+
 static PyGetSetDef PyPipeClient_getset[] = {
     {"is_connected", reinterpret_cast<getter>(PyPipeClient_get_is_connected),
      nullptr, "True when connected", nullptr},
     {"pipe_name",    reinterpret_cast<getter>(PyPipeClient_get_pipe_name),
      nullptr, "Pipe identifier name", nullptr},
+    {"negotiated_capabilities",
+     reinterpret_cast<getter>(PyPipeClient_get_negotiated_capabilities),
+     nullptr, "NegotiatedCapabilities after connect()", nullptr},
     {nullptr, nullptr, nullptr, nullptr, nullptr}
 };
 

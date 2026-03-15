@@ -14,6 +14,7 @@
 #include "py_rpc_pipe_server.hpp"
 #include "py_pipe_stats.hpp"
 #include "py_exceptions.hpp"
+#include "py_capability.hpp"
 
 // ─── モジュール定義 ───────────────────────────────────────────────────
 
@@ -49,13 +50,14 @@ static PyModuleDef pipeutil_module_def = {
 #endif
 PyMODINIT_FUNC PyInit__pipeutil(void) {
     // 1. 型オブジェクトの準備（継承ツリーを設定）
-    if (PyType_Ready(&pyutil::PyMessage_Type)         < 0) return nullptr;
-    if (PyType_Ready(&pyutil::PyPipeServer_Type)      < 0) return nullptr;
-    if (PyType_Ready(&pyutil::PyPipeClient_Type)      < 0) return nullptr;
-    if (PyType_Ready(&pyutil::PyMultiPipeServer_Type) < 0) return nullptr;
-    if (PyType_Ready(&pyutil::PyRpcPipeClient_Type)   < 0) return nullptr;
-    if (PyType_Ready(&pyutil::PyRpcPipeServer_Type)   < 0) return nullptr;
-    if (PyType_Ready(&pyutil::PyPipeStats_Type)       < 0) return nullptr;
+    if (PyType_Ready(&pyutil::PyMessage_Type)                  < 0) return nullptr;
+    if (PyType_Ready(&pyutil::PyPipeServer_Type)               < 0) return nullptr;
+    if (PyType_Ready(&pyutil::PyPipeClient_Type)               < 0) return nullptr;
+    if (PyType_Ready(&pyutil::PyMultiPipeServer_Type)          < 0) return nullptr;
+    if (PyType_Ready(&pyutil::PyRpcPipeClient_Type)            < 0) return nullptr;
+    if (PyType_Ready(&pyutil::PyRpcPipeServer_Type)            < 0) return nullptr;
+    if (PyType_Ready(&pyutil::PyPipeStats_Type)                < 0) return nullptr;
+    if (PyType_Ready(&pyutil::PyNegotiatedCapabilities_Type)   < 0) return nullptr;
 
     // 2. モジュール作成
     PyObject* m = PyModule_Create(&pipeutil_module_def);
@@ -76,6 +78,8 @@ PyMODINIT_FUNC PyInit__pipeutil(void) {
         reinterpret_cast<PyObject*>(&pyutil::PyRpcPipeServer_Type));
     ADD_OBJECT_OR_FAIL(m, "PipeStats",
         reinterpret_cast<PyObject*>(&pyutil::PyPipeStats_Type));
+    ADD_OBJECT_OR_FAIL(m, "NegotiatedCapabilities",
+        reinterpret_cast<PyObject*>(&pyutil::PyNegotiatedCapabilities_Type));
 
     // 4. 例外の登録（init_exceptions 内で g_* グローバルを初期化）
     if (pyutil::init_exceptions(m) < 0) {
@@ -110,7 +114,7 @@ PyMODINIT_FUNC PyInit__pipeutil(void) {
     }
 
     // 5. バージョン定数
-    if (PyModule_AddStringConstant(m, "__version__", "1.0.0") < 0) {
+    if (PyModule_AddStringConstant(m, "__version__", "1.1.0") < 0) {
         Py_DECREF(m);
         return nullptr;
     }

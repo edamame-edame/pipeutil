@@ -9,6 +9,7 @@ set(PYTHON_EXT_SOURCES
     py_pipe_stats.cpp
     py_message.cpp
     py_exceptions.cpp
+    py_capability.cpp
 )
 
 # ─── ターゲット定義（MODULE = Python 拡張モジュール）────────────────────
