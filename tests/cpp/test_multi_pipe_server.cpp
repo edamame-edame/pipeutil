@@ -41,8 +41,10 @@ TEST(MultiPipeServerTest, StartStop) {
         srv.serve([](PipeServer /*conn*/) {});
     });
 
-    // サーバーが起動するのを少し待つ
-    std::this_thread::sleep_for(100ms);
+    // serve() は非同期スレッド内で serving_ を true にするまでポーリング
+    for (int i = 0; i < 200 && !srv.is_serving(); ++i) {
+        std::this_thread::sleep_for(5ms);
+    }
     EXPECT_TRUE(srv.is_serving());
 
     // 別スレッドから停止
@@ -67,8 +69,7 @@ TEST(MultiPipeServerTest, SingleClientEcho) {
         });
     });
 
-    std::this_thread::sleep_for(100ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     // クライアント接続
     PipeClient cli{name};
     cli.connect(3000ms);
@@ -77,8 +78,7 @@ TEST(MultiPipeServerTest, SingleClientEcho) {
     EXPECT_EQ(reply.as_string_view(), "ping");
     cli.close();
 
-    // ハンドラが完了するのを待ってから停止
-    std::this_thread::sleep_for(100ms);
+    // srv.stop() は active_count_ == 0 まで内部で待機するため sleep 不要
     srv.stop();
     srv_fut.get();
 
@@ -101,8 +101,7 @@ TEST(MultiPipeServerTest, MultipleClientsParallel) {
         });
     });
 
-    std::this_thread::sleep_for(100ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     // N クライアントを並行起動
     std::vector<std::future<void>> cli_futs;
     cli_futs.reserve(N);
@@ -121,10 +120,7 @@ TEST(MultiPipeServerTest, MultipleClientsParallel) {
     // 全クライアント完了を待つ
     for (auto& f : cli_futs) f.get();
 
-    // 全ハンドラ完了まで少し待ってから停止
-    for (int i = 0; i < 50 && counter.load() < N; ++i) {
-        std::this_thread::sleep_for(20ms);
-    }
+    // srv.stop() は active_count_ == 0 まで内部で待機するため polling 不要
     srv.stop();
     srv_fut.get();
 
@@ -155,8 +151,7 @@ TEST(MultiPipeServerTest, SlotLimitHonored) {
         });
     });
 
-    std::this_thread::sleep_for(100ms);
-
+    // connect() は ERROR_FILE_NOT_FOUND を内部でリトライするため sleep 不要
     // MAX + 1 クライアントを順番に接続（各クライアントはメッセージを送ってから切断）
     for (std::size_t i = 0; i < MAX + 1; ++i) {
         PipeClient cli{name};
@@ -166,10 +161,7 @@ TEST(MultiPipeServerTest, SlotLimitHonored) {
         std::this_thread::sleep_for(50ms);
     }
 
-    // 全ハンドラ完了を待ってから停止
-    for (int i = 0; i < 100 && done_count.load() < static_cast<int>(MAX + 1); ++i) {
-        std::this_thread::sleep_for(20ms);
-    }
+    // srv.stop() は active_count_ == 0 まで内部で待機するため polling 不要
     srv.stop();
     srv_fut.get();
 

@@ -12,10 +12,12 @@ class TestBasicRoundTrip:
     def test_client_to_server(self, make_server):
         pipe_name = unique_pipe("c2s")
         received: list[bytes] = []
+        done = threading.Event()
 
         def handler(srv: pipeutil.PipeServer):
             msg = srv.receive(3000)
             received.append(bytes(msg))
+            done.set()
 
         make_server(pipe_name, handler=handler)
 
@@ -24,8 +26,7 @@ class TestBasicRoundTrip:
         cli.send(pipeutil.Message(b"hello"))
         cli.close()
 
-        # サーバースレッドが終了するまで少し待つ
-        import time; time.sleep(0.1)
+        assert done.wait(3.0), "server handler did not complete"
         assert received == [b"hello"]
 
     def test_server_to_client(self, make_server):
@@ -64,11 +65,13 @@ class TestMultipleMessages:
         pipe_name = unique_pipe("multi50")
         count = 50
         received: list[bytes] = []
+        done = threading.Event()
 
         def handler(srv: pipeutil.PipeServer):
             for _ in range(count):
                 msg = srv.receive(3000)
                 received.append(bytes(msg))
+            done.set()
 
         make_server(pipe_name, handler=handler)
 
@@ -78,7 +81,7 @@ class TestMultipleMessages:
             cli.send(pipeutil.Message(f"msg_{i}".encode()))
         cli.close()
 
-        import time; time.sleep(0.5)
+        assert done.wait(5.0), "server handler did not complete"
         assert len(received) == count
         for i, data in enumerate(received):
             assert data == f"msg_{i}".encode()
@@ -91,10 +94,12 @@ class TestLargePayload:
         pipe_name = unique_pipe("large1m")
         payload = bytes([0xCD] * (1024 * 1024))  # 1 MiB
         received: list[bytes] = []
+        done = threading.Event()
 
         def handler(srv: pipeutil.PipeServer):
             msg = srv.receive(10000)
             received.append(bytes(msg))
+            done.set()
 
         make_server(pipe_name, handler=handler)
 
@@ -103,7 +108,7 @@ class TestLargePayload:
         cli.send(pipeutil.Message(payload))
         cli.close()
 
-        import time; time.sleep(1.0)
+        assert done.wait(10.0), "server handler did not complete"
         assert len(received) == 1
         assert received[0] == payload
 

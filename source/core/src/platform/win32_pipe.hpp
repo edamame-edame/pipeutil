@@ -60,8 +60,11 @@ private:
     // 閉じた際に自動キャンセルされ、accept_ov_ が書き換えられても安全。
     OVERLAPPED   accept_ov_      = {};                   // ConnectNamedPipe 用 OVERLAPPED
     HANDLE       accept_event_   = nullptr;              // accept_ov_.hEvent
-    bool         listening_      = false;
-    bool         connected_      = false;
+    bool         listening_         = false;
+    bool         connected_         = false;
+    // フォーク後に次ハンドルで ConnectNamedPipe を事前発行した際、クライアントが
+    // ConnectNamedPipe 呼び出し前に接続済みの場合 true（I/O 完了待ち不要）
+    bool         accept_preconnected_ = false;
     std::size_t  buf_size_;
     std::wstring pipe_name_wstr_;  // server_accept_and_fork で再作成するために保存
     // ACL 設定 (F-008): server_accept_and_fork での再作成にも同一の ACL を再適用するために保持する

@@ -21,7 +21,11 @@ class TestMultiPipeServerBasic:
             daemon=True,
         )
         t.start()
-        time.sleep(0.1)  # 起動待ち
+        # serve() が serving_ を True にするまでポーリング（5ms × 200回 = 最大 1s）
+        for _ in range(200):
+            if srv.is_serving:
+                break
+            time.sleep(0.005)
 
         assert srv.is_serving
 
@@ -35,27 +39,26 @@ class TestMultiPipeServerBasic:
         pipe_name = unique_pipe("mps_echo")
         srv = pipeutil.MultiPipeServer(pipe_name, max_connections=2)
         received: list[bytes] = []
+        handler_done = threading.Event()
 
         def handler(conn: pipeutil.PipeServer) -> None:
             msg = conn.receive(3000)
             conn.send(msg)
             received.append(bytes(msg))
+            handler_done.set()
 
         t = threading.Thread(target=srv.serve, args=[handler], daemon=True)
         t.start()
-        time.sleep(0.1)
 
+        # connect() はサーバー起動前を自動リトライするため sleep 不要
         cli = pipeutil.PipeClient(pipe_name)
         cli.connect(3000)
         cli.send(pipeutil.Message(b"hello_multi"))
         reply = cli.receive(3000)
         cli.close()
 
-        # ハンドラ完了まで待つ
-        for _ in range(50):
-            if received:
-                break
-            time.sleep(0.02)
+        # ハンドラ完了まで確実に待つ（最大 3s）
+        assert handler_done.wait(3.0), "handler did not complete"
 
         srv.stop()
         t.join(timeout=3.0)
@@ -80,8 +83,8 @@ class TestMultiPipeServerBasic:
 
         t = threading.Thread(target=srv.serve, args=[handler], daemon=True)
         t.start()
-        time.sleep(0.1)
 
+        # connect() はサーバー起動前を自動リトライするため sleep 不要
         def client_task(idx: int) -> str:
             cli = pipeutil.PipeClient(pipe_name)
             cli.connect(3000)
