@@ -67,6 +67,10 @@ public:
         stop_flag_ = true;
         // acceptor の server_accept_and_fork() を割り込み解除
         if (platform_) platform_->stop_accept();
+        // stop() 呼び出し時に acceptor が sem_.acquire() でブロック中の場合、
+        // stop_accept() だけでは解除できないため sem_ を 1 つ追加解放して起動する。
+        // run_acceptor 内で stop_flag_ を確認し sem_.release() で元に戻す。
+        sem_.release();
         // acceptor スレッドの終了を待つ
         if (acceptor_thread_.joinable()) acceptor_thread_.join();
 
@@ -161,7 +165,14 @@ private:
             }
 
             // スロット確保（上限を超える場合はブロック）
+            // stop() が sem_ を 1 つ追加解放する場合があるため、
+            // unblock 後は stop_flag_ を再確認して stop 時の余分な slot 碷使いを防ぐ。
             sem_.acquire();
+            if (stop_flag_) {
+                // stop() による追加解放で起動した: カウントを元に戻してループを抜ける
+                sem_.release();
+                break;
+            }
             active_count_.fetch_add(1, std::memory_order_relaxed);
 
             // ハンドラスレッドを detach；RAII SlotGuard で確実に sem_.release() する
