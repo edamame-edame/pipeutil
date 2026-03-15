@@ -2,10 +2,12 @@
 #pragma once
 
 #include "pipeutil_export.hpp"
+#include "capability.hpp"
 #include "message.hpp"
 #include "pipe_acl.hpp"
 #include "pipe_stats.hpp"
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -30,10 +32,13 @@ public:
     /// buffer_size : 内部 IOBuffer のサイズ（デフォルト 64 KiB）
     /// acl         : アクセス制御レベル（デフォルト: OS デフォルト，後方互換）
     /// custom_sddl : PipeAcl::Custom 指定時の SDDL 文字列（Windows のみ有効）
+    /// hello_config: HELLO ハンドシェイクポリシー（デフォルト = Compat / 500ms）
+    /// デフォルト引数により既存コードへの影響はない（後方互換）。
     explicit PipeServer(std::string pipe_name,
                         std::size_t buffer_size  = 65536,
                         PipeAcl     acl          = PipeAcl::Default,
-                        std::string custom_sddl  = "");
+                        std::string custom_sddl  = "",
+                        HelloConfig hello_config = HelloConfig{});
 
     PipeServer(const PipeServer&)            = delete;
     PipeServer& operator=(const PipeServer&) = delete;
@@ -73,6 +78,16 @@ public:
     [[nodiscard]] bool               is_listening() const noexcept;
     [[nodiscard]] bool               is_connected() const noexcept;
     [[nodiscard]] const std::string& pipe_name()    const noexcept;
+
+    // ─── Capability Negotiation (A-001) ──────────────────────────────
+
+    /// accept() 完了直後に呼び出されるコールバック。HELLO 成否に関わらず必ず呼ばれる。
+    /// v1 フォールバック時は caps.is_legacy_v1() == true。
+    std::function<void(const NegotiatedCapabilities&)> on_hello_complete;
+
+    /// 直近の accept() で確立した接続の合意済み機能を返す。
+    /// accept() 呼び出し前は bitmap == 0（未定義）。
+    [[nodiscard]] NegotiatedCapabilities negotiated_capabilities() const noexcept;
 
     // ─── 診断・メトリクス (F-006) ─────────────────────────────────────
 

@@ -1,11 +1,13 @@
 // py_pipe_server.cpp — PyPipeServer 型実装
 // 仕様: spec/04_python_wrapper.md §5
 // GIL: accept / send / receive はブロッキング I/O のため GIL を解放する。
+// Capability Negotiation: spec/A001_capability_negotiation.md
 
 #include "py_pipe_server.hpp"
 #include "py_exceptions.hpp"
 #include "py_message.hpp"
 #include "py_pipe_stats.hpp"
+#include "py_capability.hpp"
 #include "py_debug_log.hpp"
 #include <chrono>
 
@@ -33,21 +35,27 @@ static PyObject* PyPipeServer_new(PyTypeObject* type,
                                   PyObject* /*args*/,
                                   PyObject* /*kwds*/) {
     PyPipeServer* self = reinterpret_cast<PyPipeServer*>(type->tp_alloc(type, 0));
-    if (self) self->server = nullptr;
+    if (self) {
+        self->server              = nullptr;
+        self->on_hello_complete_cb = nullptr;
+    }
     return reinterpret_cast<PyObject*>(self);
 }
 
 static int PyPipeServer_init(PyPipeServer* self, PyObject* args, PyObject* kwds) {
-    static const char* kwlist[] = {"pipe_name", "buffer_size", "acl", "custom_sddl", nullptr};
-    const char* pipe_name   = nullptr;
-    Py_ssize_t  buffer_size = 65536;
-    int         acl_int     = 0;          // PipeAcl::Default
-    const char* custom_sddl = nullptr;
+    static const char* kwlist[] = {
+        "pipe_name", "buffer_size", "acl", "custom_sddl", "hello_config", nullptr};
+    const char* pipe_name        = nullptr;
+    Py_ssize_t  buffer_size      = 65536;
+    int         acl_int          = 0;   // PipeAcl::Default
+    const char* custom_sddl      = nullptr;
+    PyObject*   hello_config_obj = nullptr;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|niz",
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|nizO",
                                      const_cast<char**>(kwlist),
                                      &pipe_name, &buffer_size,
-                                     &acl_int, &custom_sddl)) {
+                                     &acl_int, &custom_sddl,
+                                     &hello_config_obj)) {
         return -1;
     }
     if (buffer_size <= 0) {
@@ -62,13 +70,39 @@ static int PyPipeServer_init(PyPipeServer* self, PyObject* args, PyObject* kwds)
         return -1;
     }
 
+    // HelloConfig の解析 (None / 省略時はデフォルト値) (A-001)
+    pipeutil::HelloConfig hello_cfg{};
+    if (hello_config_obj && hello_config_obj != Py_None) {
+        PyObject* mode_attr = PyObject_GetAttrString(hello_config_obj, "mode");
+        if (!mode_attr) return -1;
+        long mode_val = PyLong_AsLong(mode_attr);
+        Py_DECREF(mode_attr);
+        if (mode_val == -1 && PyErr_Occurred()) return -1;
+        hello_cfg.mode = static_cast<pipeutil::HelloMode>(mode_val);
+
+        PyObject* timeout_attr = PyObject_GetAttrString(hello_config_obj, "hello_timeout_ms");
+        if (!timeout_attr) return -1;
+        long timeout_val = PyLong_AsLong(timeout_attr);
+        Py_DECREF(timeout_attr);
+        if (timeout_val == -1 && PyErr_Occurred()) return -1;
+        hello_cfg.hello_timeout = std::chrono::milliseconds{timeout_val};
+
+        PyObject* caps_attr = PyObject_GetAttrString(hello_config_obj, "advertised_capabilities");
+        if (!caps_attr) return -1;
+        unsigned long caps_val = PyLong_AsUnsignedLong(caps_attr);
+        Py_DECREF(caps_attr);
+        if (caps_val == static_cast<unsigned long>(-1) && PyErr_Occurred()) return -1;
+        hello_cfg.advertised_capabilities = static_cast<uint32_t>(caps_val);
+    }
+
     try {
         delete self->server;
         self->server = new pipeutil::PipeServer{
             std::string{pipe_name},
             static_cast<std::size_t>(buffer_size),
             static_cast<pipeutil::PipeAcl>(acl_int),
-            custom_sddl ? std::string{custom_sddl} : std::string{}};
+            custom_sddl ? std::string{custom_sddl} : std::string{},
+            hello_cfg};
     } catch (const pipeutil::PipeException& e) {
         set_python_exception(e);
         return -1;
@@ -82,6 +116,8 @@ static int PyPipeServer_init(PyPipeServer* self, PyObject* args, PyObject* kwds)
 static void PyPipeServer_dealloc(PyPipeServer* self) {
     delete self->server;
     self->server = nullptr;
+    Py_XDECREF(self->on_hello_complete_cb);
+    self->on_hello_complete_cb = nullptr;
     Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
@@ -125,6 +161,18 @@ static PyObject* PyPipeServer_accept(PyPipeServer* self, PyObject* args, PyObjec
         delete pending;
         return nullptr;
     }
+
+    // on_hello_complete コールバックを GIL 保持下で呼び出す (A-001)
+    if (self->on_hello_complete_cb) {
+        auto caps = self->server->negotiated_capabilities();
+        PyObject* py_caps = PyNegotiatedCapabilities_from_caps(caps);
+        if (!py_caps) return nullptr;
+        PyObject* result = PyObject_CallOneArg(self->on_hello_complete_cb, py_caps);
+        Py_DECREF(py_caps);
+        if (!result) return nullptr;  // Python 例外を伝播
+        Py_DECREF(result);
+    }
+
     Py_RETURN_NONE;
 }
 
@@ -246,6 +294,34 @@ static PyObject* PyPipeServer_get_pipe_name(PyPipeServer* self, void*) {
     return PyUnicode_FromString(self->server->pipe_name().c_str());
 }
 
+// ネゴシエーション結果プロパティ (A-001)
+static PyObject* PyPipeServer_get_negotiated_capabilities(PyPipeServer* self, void*) {
+    if (!self->server) {
+        PyErr_SetString(PyExc_RuntimeError, "PipeServer is closed");
+        return nullptr;
+    }
+    return PyNegotiatedCapabilities_from_caps(self->server->negotiated_capabilities());
+}
+
+// on_hello_complete コールバックゲッター
+static PyObject* PyPipeServer_get_on_hello_complete(PyPipeServer* self, void*) {
+    PyObject* cb = self->on_hello_complete_cb ? self->on_hello_complete_cb : Py_None;
+    Py_INCREF(cb);
+    return cb;
+}
+
+// on_hello_complete コールバックセッター
+static int PyPipeServer_set_on_hello_complete(PyPipeServer* self, PyObject* value, void*) {
+    if (value && value != Py_None && !PyCallable_Check(value)) {
+        PyErr_SetString(PyExc_TypeError, "on_hello_complete must be callable or None");
+        return -1;
+    }
+    Py_XDECREF(self->on_hello_complete_cb);
+    self->on_hello_complete_cb = (value == Py_None || value == nullptr) ? nullptr : value;
+    Py_XINCREF(self->on_hello_complete_cb);
+    return 0;
+}
+
 static PyGetSetDef PyPipeServer_getset[] = {
     {"is_listening", reinterpret_cast<getter>(PyPipeServer_get_is_listening),
      nullptr, "True after listen()", nullptr},
@@ -253,6 +329,13 @@ static PyGetSetDef PyPipeServer_getset[] = {
      nullptr, "True after accept()", nullptr},
     {"pipe_name",    reinterpret_cast<getter>(PyPipeServer_get_pipe_name),
      nullptr, "Pipe identifier name", nullptr},
+    {"negotiated_capabilities",
+     reinterpret_cast<getter>(PyPipeServer_get_negotiated_capabilities),
+     nullptr, "NegotiatedCapabilities after accept()", nullptr},
+    {"on_hello_complete",
+     reinterpret_cast<getter>(PyPipeServer_get_on_hello_complete),
+     reinterpret_cast<setter>(PyPipeServer_set_on_hello_complete),
+     "Callable invoked with NegotiatedCapabilities after accept()", nullptr},
     {nullptr, nullptr, nullptr, nullptr, nullptr}
 };
 

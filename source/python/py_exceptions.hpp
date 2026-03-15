@@ -17,6 +17,8 @@ extern PyObject* g_ConnectionResetError;
 extern PyObject* g_BrokenPipeError;
 extern PyObject* g_NotConnectedError;
 extern PyObject* g_InvalidMessageError;
+extern PyObject* g_ConnectionRejectedError;  // v1.1.0 A-001 HELLO 拒否
+extern PyObject* g_QueueFullError;            // v1.1.0 A-002 事前予約
 
 // ─── C++ 例外 → Python 例外 変換 ──────────────────────────────────
 /// PipeException を受け取り、対応する Python 例外をセットする。

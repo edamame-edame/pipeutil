@@ -9,7 +9,8 @@ namespace pyutil {
 
 struct PyPipeServer {
     PyObject_HEAD
-    pipeutil::PipeServer* server;  // nullptr = closed / uninitialized
+    pipeutil::PipeServer* server;          // nullptr = closed / uninitialized
+    PyObject*             on_hello_complete_cb;  // Python callable or nullptr (A-001)
 };
 
 extern PyTypeObject PyPipeServer_Type;
